@@ -1,0 +1,106 @@
+# Atlas Trader configuration.
+# Anything marked VERIFY must be checked against your broker / prop firm before
+# trusting results. Wrong contract values = wrong position sizes.
+
+mode: backtest            # backtest | demo | live   (live also needs --i-accept-real-money-risk)
+
+account:
+  starting_balance: 50000  # VERIFY: your prop account size
+  currency: USD
+
+# Prop-firm rules. The bot treats these as HARD limits and stops itself
+# well before reaching them (see safety_buffer).
+prop_rules:
+  firm: Toptraders                # VERIFY every number below on the firm's rules page
+  phase: evaluation               # evaluation | funded
+  profit_target_pct: 8.0          # eval profit target (% of starting balance)
+  daily_loss_pct: 4.0             # max loss in one day (% of basis below)
+  daily_loss_basis: start_of_day  # initial | start_of_day
+  max_drawdown_pct: 8.0           # max total drawdown (% of starting balance)
+  drawdown_type: trailing         # static | trailing
+  trailing_on: equity             # balance | equity (what the trailing high-water mark follows)
+  trail_locks_at_initial: true    # trailing floor stops rising once it reaches starting balance
+  min_trading_days: 0
+  safety_buffer: 0.70             # bot halts after using 70% of a limit (never touch the real limit)
+
+risk:
+  risk_per_trade_pct: 0.5         # % of equity risked per trade (distance entry->stop)
+  max_trades_per_day: 3
+  max_consecutive_losses: 3       # stop for the day after N losses in a row
+  max_open_positions: 1
+  max_lots: 5.0
+  # Never risk more than this fraction of the room left before the daily/max-DD halt
+  max_room_fraction_per_trade: 0.5
+
+session:
+  timezone: America/New_York
+  open: "09:30"
+  trade_start: "09:45"            # no entries before this
+  last_entry: "15:00"             # no new entries after this
+  flat_by: "15:50"                # everything closed by this time, every day
+  weekdays: [0, 1, 2, 3, 4]       # Mon-Fri
+
+# Times (exchange local timezone) when the bot will not open trades and will
+# close open ones, e.g. CPI / FOMC / NFP. Format: "YYYY-MM-DD HH:MM" with minutes either side.
+news_blackouts:
+  minutes_before: 15
+  minutes_after: 15
+  events: []
+  # - "2026-11-07 08:30"   # NFP example
+
+# Instruments as named on your TradeLocker platform.
+# value_per_point = account-currency P/L for a 1.0-point move with 1.0 lot.  VERIFY in TradeLocker.
+instruments:
+  NAS100:
+    value_per_point: 1.0          # VERIFY
+    min_lot: 0.1                  # VERIFY
+    lot_step: 0.1                 # VERIFY
+    spread_points: 1.5            # typical spread, used in backtests
+    slippage_points: 0.5
+    commission_per_lot: 0.0       # per side
+  US500:
+    value_per_point: 1.0          # VERIFY
+    min_lot: 0.1
+    lot_step: 0.1
+    spread_points: 0.5
+    slippage_points: 0.25
+    commission_per_lot: 0.0
+  US30:
+    value_per_point: 1.0          # VERIFY
+    min_lot: 0.1
+    lot_step: 0.1
+    spread_points: 2.5
+    slippage_points: 1.0
+    commission_per_lot: 0.0
+
+# Which strategy runs on which instrument. Params override strategy defaults.
+strategies:
+  - name: orb
+    instruments: [NAS100]
+    timeframe: 5m
+    params:
+      range_minutes: 15
+      reward_risk: 2.0
+      max_range_atr: 2.5
+  # - name: trend_pullback
+  #   instruments: [US500]
+  #   timeframe: 5m
+  # - name: vwap_reversion
+  #   instruments: [US30]
+  #   timeframe: 5m
+
+tradelocker:
+  demo_url: https://demo.tradelocker.com
+  live_url: https://live.tradelocker.com
+
+webhook:
+  host: 0.0.0.0
+  port: 8787
+  # TradingView alerts are executed through the same risk engine.
+  default_reward_risk: 2.0
+
+paths:
+  state_dir: state
+  log_dir: logs
+  report_dir: reports
+  kill_switch_file: state/KILL     # create this file to flatten everything and stop the bot
