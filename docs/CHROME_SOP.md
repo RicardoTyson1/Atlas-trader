@@ -4,7 +4,7 @@ Before you start, log in yourself (Claude should never type your passwords) to:
 1. Your prop firm dashboard (Toptraders / Top One Trader)
 2. TradeLocker web platform (the DEMO account)
 3. TradingView
-4. GitHub (github.com/RicardoTyson1/atlas-trader)
+4. GitHub (github.com/RicardoTyson1/Atlas-trader)
 
 Then paste everything in the box below into Claude in Chrome.
 
@@ -78,7 +78,7 @@ In TradingView:
 If the export option is not available on my TradingView plan, stop and tell me.
 
 TASK 4: UPLOAD THE CSV FILES TO GITHUB
-  1. Go to https://github.com/RicardoTyson1/atlas-trader
+  1. Go to https://github.com/RicardoTyson1/Atlas-trader
   2. Navigate into the "data" folder, then "Add file" → "Upload files".
   3. Upload the CSV files into a folder named data/raw/ (type "raw/" before the file
      name if needed so they land in data/raw/).
