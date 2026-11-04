@@ -11,3 +11,4 @@ data/*.csv
 *.egg-info/
 build/
 dist/
+data/raw/

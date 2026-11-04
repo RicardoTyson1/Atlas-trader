@@ -190,6 +190,25 @@ def cmd_run(args, cfg: Config) -> None:
     runner.run_forever()
 
 
+def cmd_download(args, cfg: Config) -> None:
+    """Download history from TradeLocker into data/raw/<SYMBOL>_<tf>.csv (read-only)."""
+    from .brokers.tradelocker import TradeLockerBroker
+
+    _load_env()
+    allowed = cfg.tradelocker.get("demo_account_ids") or None
+    broker = TradeLockerBroker(cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com"),
+                               allowed_account_ids=[int(a) for a in allowed] if allowed else None)
+    out_dir = Path("data/raw")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    end = pd.Timestamp.now(tz="UTC").floor("min")
+    start = end - pd.Timedelta(days=args.days)
+    for sym in args.symbols:
+        df = broker.history(sym, args.tf, start, end)
+        path = out_dir / f"{sym}_{args.tf}.csv"
+        df.rename_axis("time").to_csv(path)
+        print(f"{sym}: {len(df)} bars {df.index.min()} -> {df.index.max()} -> {path}  spec {broker.spec(sym)}")
+
+
 def cmd_status(args, cfg: Config) -> None:
     p = Path(cfg.paths.get("state_dir", "state")) / "runner_state.json"
     print(p.read_text() if p.exists() else "No state yet (bot has not run).")
@@ -251,6 +270,12 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--webhook", action="store_true", help="also accept TradingView alerts")
     r.add_argument("--i-accept-real-money-risk", action="store_true")
     r.set_defaults(fn=cmd_run)
+
+    dl = sub.add_parser("download", help="download price history from TradeLocker (read-only)")
+    dl.add_argument("symbols", nargs="+")
+    dl.add_argument("--tf", default="5m")
+    dl.add_argument("--days", type=int, default=730)
+    dl.set_defaults(fn=cmd_download)
 
     st = sub.add_parser("status", help="show saved risk state")
     st.set_defaults(fn=cmd_status)

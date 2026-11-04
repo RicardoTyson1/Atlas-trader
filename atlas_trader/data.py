@@ -63,7 +63,7 @@ def load_csv(path: str | Path, tz: str = "UTC") -> pd.DataFrame:
     if tcol is None:
         raise ValueError("CSV needs a time/datetime/timestamp/date column")
     t = raw[tcol]
-    if np.issubdtype(t.dtype, np.number):
+    if pd.api.types.is_numeric_dtype(t):
         unit = "ms" if t.iloc[0] > 1e11 else "s"
         idx = pd.to_datetime(t, unit=unit, utc=True)
     else:
@@ -91,7 +91,7 @@ def add_session_columns(df: pd.DataFrame, tz: str) -> pd.DataFrame:
     local = out.index.tz_convert(tz)
     out["day"] = local.date
     out["tod"] = local.hour * 60 + local.minute
-    out["weekday"] = local.weekday
+    out["weekday"] = local.day_of_week
     return out
 
 

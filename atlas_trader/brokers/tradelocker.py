@@ -10,7 +10,7 @@ import os
 
 import pandas as pd
 
-from ..data import normalize
+from ..data import normalize, timeframe_to_offset
 from .base import Account, Broker, Position
 
 log = logging.getLogger(__name__)
@@ -61,6 +61,36 @@ class TradeLockerBroker(Broker):
         now = pd.Timestamp.now(tz="UTC")
         df = df[df.index + step <= now]   # completed bars only
         return df.tail(count)
+
+    def history(self, symbol: str, timeframe: str, start: pd.Timestamp, end: pd.Timestamp,
+                chunk_rows: int = 25000, pause: float = 1.0) -> pd.DataFrame:
+        """Download a long range of bars in chunks (oldest first)."""
+        import time as _t
+
+        step = pd.Timedelta(timeframe_to_offset(timeframe))
+        chunk = step * chunk_rows
+        frames = []
+        t0 = start
+        while t0 < end:
+            t1 = min(t0 + chunk, end)
+            raw = self.api.get_price_history(
+                self._iid(symbol), resolution=timeframe,
+                start_timestamp=int(t0.timestamp() * 1000), end_timestamp=int(t1.timestamp() * 1000),
+            )
+            if raw is not None and not raw.empty:
+                frames.append(raw)
+            t0 = t1
+            _t.sleep(pause)
+        if not frames:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        raw = pd.concat(frames)
+        df = raw.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
+        df.index = pd.to_datetime(df["t"], unit="ms", utc=True)
+        return normalize(df.drop(columns=["t"]))
+
+    def spec(self, symbol: str) -> dict:
+        d = self.api.get_instrument_details(self._iid(symbol))
+        return {k: d.get(k) for k in ("lotSize", "lotStep", "minLot", "maxLot", "leverage")}
 
     def account(self) -> Account:
         st = self.api.get_account_state()

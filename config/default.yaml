@@ -5,7 +5,7 @@
 mode: backtest            # backtest | demo | live   (live also needs --i-accept-real-money-risk)
 
 account:
-  starting_balance: 1000   # VERIFY: set to the balance of GatesFX demo #2594911
+  starting_balance: 10000  # GatesFX demo #2594911 (confirmed via API 2026-11-04)
   currency: USD
 
 # Prop-firm rules. The bot treats these as HARD limits and stops itself
@@ -48,59 +48,60 @@ news_blackouts:
   events: []
   # - "2026-11-07 08:30"   # NFP example
 
-# Instruments as named on your TradeLocker platform.
-# value_per_point = account-currency P/L for a 1.0-point move with 1.0 lot.  VERIFY in TradeLocker.
+# Instruments as named on GatesFX TradeLocker. Specs read from the TradeLocker API
+# on 2026-11-04 (lotSize 100, lotStep 0.01, minLot 0.01 for all four).
+# value_per_point = P/L in USD for a 1.0 price move with 1.0 lot (= lotSize).
+# Spreads observed via API off-hours (conservative for the NY session).
 instruments:
-  NAS100:
-    value_per_point: 1.0          # VERIFY
-    min_lot: 0.1                  # VERIFY
-    lot_step: 0.1                 # VERIFY
-    spread_points: 1.5            # typical spread, used in backtests
-    slippage_points: 0.5
-    commission_per_lot: 0.0       # per side
-  US500:
-    value_per_point: 1.0          # VERIFY
-    min_lot: 0.1
-    lot_step: 0.1
-    spread_points: 0.5
-    slippage_points: 0.25
-    commission_per_lot: 0.0
-  US30:
-    value_per_point: 1.0          # VERIFY
-    min_lot: 0.1
-    lot_step: 0.1
-    spread_points: 2.5
-    slippage_points: 1.0
-    commission_per_lot: 0.0
-  XAUUSD.R:                       # GatesFX gold (from TradeLocker instrument panel, 2026-11-03)
-    value_per_point: 100.0        # lot size 100 oz -> $100 per $1.00 move per lot
+  XAUUSD.R:
+    value_per_point: 100.0
     min_lot: 0.01
-    lot_step: 0.01                # VERIFY (not shown in panel)
-    spread_points: 0.14           # 14 points = $0.14 (bid 3931.58 / ask 3931.72)
+    lot_step: 0.01
+    spread_points: 0.14
     slippage_points: 0.10
     commission_per_lot: 3.5       # $7.00 opening fee per lot, modelled as 3.5 per side
+  NAS100.R:
+    value_per_point: 100.0
+    min_lot: 0.01
+    lot_step: 0.01
+    spread_points: 1.39
+    slippage_points: 0.5
+    commission_per_lot: 3.5       # VERIFY: fee not confirmed for indices; assumed same as gold
+  US30.R:
+    value_per_point: 100.0
+    min_lot: 0.01
+    lot_step: 0.01
+    spread_points: 2.15
+    slippage_points: 1.0
+    commission_per_lot: 3.5       # VERIFY
+  SPX500.R:
+    value_per_point: 100.0
+    min_lot: 0.01
+    lot_step: 0.01
+    spread_points: 0.69
+    slippage_points: 0.25
+    commission_per_lot: 3.5       # VERIFY
 
 # Which strategy runs on which instrument. Params override strategy defaults.
 strategies:
   - name: orb
-    instruments: [NAS100]
+    instruments: [NAS100.R]
     timeframe: 5m
     params:
       range_minutes: 15
       reward_risk: 2.0
       max_range_atr: 2.5
   # - name: trend_pullback
-  #   instruments: [US500]
+  #   instruments: [SPX500.R]
   #   timeframe: 5m
   # - name: vwap_reversion
-  #   instruments: [US30]
+  #   instruments: [US30.R]
   #   timeframe: 5m
 
 tradelocker:
-  # GatesFX hosts its DEMO accounts on the live.tradelocker.com environment
-  # (seen in the platform URL). The account-ID allowlist below is what keeps
-  # demo mode on the demo account.
-  demo_url: https://live.tradelocker.com
+  # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
+  # The account-ID allowlist keeps the bot on the intended account.
+  demo_url: https://demo.tradelocker.com
   live_url: https://live.tradelocker.com
   demo_account_ids: [2594911]     # GatesFX TradeLocker DEMO #2594911 (server GATESFX)
   live_account_ids: []            # fill in only when going live
