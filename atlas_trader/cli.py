@@ -180,7 +180,11 @@ def cmd_run(args, cfg: Config) -> None:
         if not allowed:
             sys.exit("Demo mode needs `tradelocker.demo_account_ids` in the config, so the bot can "
                      "never attach to a real-money account by mistake.")
-    broker = TradeLockerBroker(url, allowed_account_ids=[int(a) for a in allowed] if allowed else None)
+    cfg.mode = mode  # label alerts/logs with the mode actually running
+    allowed_ids = [int(a) for a in allowed] if allowed else None
+    # each config pins its own account, so several bots can share one .env login
+    broker = TradeLockerBroker(url, account_id=allowed_ids[0] if allowed_ids else None,
+                               allowed_account_ids=allowed_ids)
     runner = Runner(cfg, broker, Notifier())
     if args.webhook:
         threading.Thread(
@@ -188,6 +192,8 @@ def cmd_run(args, cfg: Config) -> None:
             daemon=True,
         ).start()
     runner.run_forever()
+    if runner.stop_reason == "errors":
+        sys.exit(1)  # non-zero so the service manager restarts the bot after a pause
 
 
 def cmd_download(args, cfg: Config) -> None:

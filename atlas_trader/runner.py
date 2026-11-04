@@ -59,6 +59,7 @@ class Runner:
         self.rm = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, cfg.starting_balance,
                               self._load_state())
         self.stopped = False
+        self.stop_reason: str | None = None
 
     # ------------------------------------------------------------ state
     @property
@@ -89,6 +90,7 @@ class Runner:
         if self.kill_file.exists():
             self.broker.close_all()
             self.stopped = True
+            self.stop_reason = "kill switch"
             self.notify.send("KILL SWITCH: all positions closed, bot stopped.", logging.WARNING)
             return ["killed"]
 
@@ -306,3 +308,4 @@ class Runner:
                     finally:
                         self.notify.send("Too many errors: positions closed, bot stopped.", logging.CRITICAL)
                         self.stopped = True
+                        self.stop_reason = "errors"

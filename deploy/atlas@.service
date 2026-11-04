@@ -1,0 +1,22 @@
+# systemd template: one bot per config file.
+#   atlas@default     -> config/default.yaml     (bot trades on the $10k demo)
+#   atlas@topstep50k  -> config/topstep50k.yaml  (guardian on the $50k demo)
+# Install:  sudo cp deploy/atlas@.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now atlas@default
+[Unit]
+Description=Atlas Trader (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlas
+WorkingDirectory=/opt/atlas-trader
+ExecStart=/opt/atlas-trader/.venv/bin/atlas --config config/%i.yaml run --mode demo
+# restart after crashes or an error-stop (positions are already flattened by then);
+# a kill-switch stop exits cleanly and stays stopped
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target
