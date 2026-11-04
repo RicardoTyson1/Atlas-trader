@@ -120,3 +120,16 @@ def test_sizing_cap_does_not_block_trading_when_account_grows(cfg):
     r.new_day("2025-01-06", 10250)  # account grew above the cap
     inst = cfg.instrument("NAS100")
     assert r.size(20000, 19990, inst, 10250) > 0
+
+
+def test_eod_trailing_like_topstep(cfg):
+    cfg.prop.trailing_on = "eod_balance"
+    cfg.prop.max_drawdown_pct = 4.0          # $2,000 on $50k
+    cfg.prop.trail_locks_at_initial = True
+    r = rm_for(cfg)                           # day 1 starts at 50,000
+    r.update(51500, 51000)                    # intraday highs do NOT move the floor
+    assert r.dd_floor(real=True) == pytest.approx(48000)
+    r.new_day("2025-01-07", 51000)            # closed day 1 at 51,000
+    assert r.dd_floor(real=True) == pytest.approx(49000)
+    r.new_day("2025-01-08", 53000)
+    assert r.dd_floor(real=True) == pytest.approx(50000)  # locked at the starting balance

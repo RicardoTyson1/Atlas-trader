@@ -1,0 +1,75 @@
+# Topstep 50K-style rules, for practising on a $50k TradeLocker DEMO.
+# Firm numbers from third-party guides (2026); VERIFY on topstep.com.
+# Gold mapping: 1 MGC micro = $10 per $1 move = 0.10 lot XAUUSD (lotSize 100).
+
+mode: backtest
+
+account:
+  starting_balance: 50000
+  currency: USD
+
+prop_rules:
+  firm: topstep-50k-practice
+  phase: evaluation
+  profit_target_pct: 6.0          # $3,000 target
+  daily_loss_pct: 2.0             # optional $1,000 DLL
+  daily_loss_basis: initial
+  max_drawdown_pct: 4.0           # $2,000 maximum loss limit
+  drawdown_type: trailing
+  trailing_on: eod_balance        # trails end-of-day balance (Topstep style)
+  trail_locks_at_initial: true
+  min_trading_days: 0
+  safety_buffer: 0.5              # bot stops at $500 down on the day / $1,000 of the $2,000 MLL
+
+risk:
+  risk_per_trade_pct: 0.4         # $200 max loss per trade (10 losers before the MLL)
+  max_trades_per_day: 8
+  max_consecutive_losses: 3
+  max_open_positions: 1
+  max_lots: 1.0                   # = 10 micros (July: up to 31 micros)
+  max_room_fraction_per_trade: 0.25
+  cooldown_after_loss_minutes: 15 # July 15: re-entered 3 seconds after losses
+  max_sizing_equity: 50000
+  guardian: true
+
+session:
+  timezone: America/New_York
+  open: "09:30"
+  trade_start: "02:00"
+  last_entry: "11:00"
+  flat_by: "15:50"
+  weekdays: [0, 1, 2, 3, 4]
+  overnight: false
+
+news_blackouts:
+  minutes_before: 15
+  minutes_after: 15
+  events: []
+
+instruments:
+  XAUUSD.R:
+    value_per_point: 100.0
+    min_lot: 0.01
+    lot_step: 0.01
+    spread_points: 0.14
+    slippage_points: 0.10
+    commission_per_lot: 3.5
+
+strategies: []                    # practice mode: you trade, the guardian enforces
+
+tradelocker:
+  demo_url: https://demo.tradelocker.com
+  live_url: https://live.tradelocker.com
+  demo_account_ids: []            # put the new $50k demo account ID here
+  live_account_ids: []
+
+webhook:
+  host: 0.0.0.0
+  port: 8787
+  default_reward_risk: 2.0
+
+paths:
+  state_dir: state/topstep50k
+  log_dir: logs
+  report_dir: reports
+  kill_switch_file: state/KILL

@@ -102,6 +102,8 @@ class RiskManager:
         if self.s.day == key:
             return
         self.s.day = key
+        if self.prop.trailing_on == "eod_balance" and balance > self.s.high_water:
+            self.s.high_water = balance  # trails the previous day's closing balance only
         self.s.sod_balance = balance
         self.s.trades_today = 0
         self.s.consec_losses = 0
@@ -111,9 +113,10 @@ class RiskManager:
         """Feed latest (worst-case) equity. Returns new alert messages, if any."""
         events: list[str] = []
         self.s.last_equity = equity
-        mark = equity if self.prop.trailing_on == "equity" else balance
-        if mark > self.s.high_water:
-            self.s.high_water = mark
+        if self.prop.trailing_on != "eod_balance":
+            mark = equity if self.prop.trailing_on == "equity" else balance
+            if mark > self.s.high_water:
+                self.s.high_water = mark
 
         if self.s.breached is None:
             if equity <= self.daily_floor(real=True):

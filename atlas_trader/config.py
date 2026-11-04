@@ -24,7 +24,7 @@ class PropRules:
     daily_loss_basis: str = "start_of_day"
     max_drawdown_pct: float = 8.0
     drawdown_type: str = "trailing"
-    trailing_on: str = "equity"
+    trailing_on: str = "equity"   # equity | balance | eod_balance (Topstep-style)
     trail_locks_at_initial: bool = True
     min_trading_days: int = 0
     safety_buffer: float = 0.70
@@ -36,8 +36,8 @@ class PropRules:
             raise ValueError("daily_loss_basis must be 'initial' or 'start_of_day'")
         if self.drawdown_type not in ("static", "trailing"):
             raise ValueError("drawdown_type must be 'static' or 'trailing'")
-        if self.trailing_on not in ("balance", "equity"):
-            raise ValueError("trailing_on must be 'balance' or 'equity'")
+        if self.trailing_on not in ("balance", "equity", "eod_balance"):
+            raise ValueError("trailing_on must be 'balance', 'equity' or 'eod_balance'")
 
 
 @dataclass
