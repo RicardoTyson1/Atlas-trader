@@ -123,9 +123,9 @@ Do not look at or read back the contents of .env.
 
 PHASE 7: CONNECTION TEST (after I say the .env is done)
   cd /opt/atlas-trader
-  sudo -u atlas .venv/bin/python -c "from atlas_trader.cli import _load_env; _load_env(); from atlas_trader.brokers.tradelocker import TradeLockerBroker as T; b=T('https://demo.tradelocker.com', allowed_account_ids=[2594911]); print('ACCOUNT', b.account()); print(b.bars('NAS100','5m',3))"
+  sudo -u atlas .venv/bin/python -c "from atlas_trader.cli import _load_env; _load_env(); from atlas_trader.brokers.tradelocker import TradeLockerBroker as T; b=T('https://demo.tradelocker.com', allowed_account_ids=[2594911]); print('ACCOUNT', b.account()); print(b.bars('XAUUSD.R','5m',3))"
 
-(Replace NAS100 with the exact symbol name from Phase 2 if different.)
+
 Expected: a line starting with ACCOUNT showing balance/equity, then 3 rows of prices.
 If you see an error, STOP and copy it to me exactly. Do not continue.
 

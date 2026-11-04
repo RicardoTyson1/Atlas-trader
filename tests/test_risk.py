@@ -91,3 +91,32 @@ def test_news_blackout(cfg):
     r = rm_for(cfg)
     assert r.check_entry(ny(10, 10))[1] == "news blackout"
     assert r.must_flatten(ny(9, 50)) == "news blackout"
+
+
+def test_cooldown_after_loss(cfg):
+    r = rm_for(cfg)
+    r.record_close(-50, ny(10, 0))
+    assert "cooldown" in r.check_entry(ny(10, 10))[1]
+    assert r.check_entry(ny(10, 16))[0]
+    r.record_close(+50, ny(10, 20))
+    assert r.check_entry(ny(10, 21))[0]
+
+
+def test_sizing_cap_ignores_bonus_money(cfg):
+    cfg.risk.max_sizing_equity = 10000
+    r = rm_for(cfg)
+    inst = cfg.instrument("NAS100")
+    capped = r.size(20000, 19950, inst, 50000)
+    # 0.5% of the $10k cap = $50 max loss, even though equity shows $50k
+    assert capped * r.risk_per_lot(20000, 19950, inst) <= 50 + 1e-9
+    cfg.risk.max_sizing_equity = None
+    assert r.size(20000, 19950, inst, 50000) > capped
+
+
+def test_sizing_cap_does_not_block_trading_when_account_grows(cfg):
+    """Regression: capping equity must not make the bot think it is past its daily floor."""
+    cfg.risk.max_sizing_equity = 10000
+    r = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, 10000)
+    r.new_day("2025-01-06", 10250)  # account grew above the cap
+    inst = cfg.instrument("NAS100")
+    assert r.size(20000, 19990, inst, 10250) > 0

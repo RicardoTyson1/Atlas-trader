@@ -3,11 +3,16 @@
 Each `step(now)`:
   1. Kill switch file present?            -> flatten everything, stop.
   2. Read account, update risk engine.     -> halts if a buffer is hit.
-  3. Session end / news / halt?            -> flatten.
-  4. For each strategy+instrument with no open position, evaluate the latest
+  3. GUARDIAN: police every position on the account, including ones opened by
+     hand: close any position with no stop-loss, any position added on top of
+     an open one, anything opened during a halt/cooldown/outside hours, and
+     anything bigger than max_lots.
+  4. Session end / news / halt?            -> flatten.
+  5. Strategy exits (exit signal / time limit) for the bot's own positions.
+  6. For each strategy+instrument with no open position, evaluate the latest
      COMPLETED bar; if it signals and risk allows, send a market order with a
      broker-side stop-loss and take-profit attached.
-  5. Save state to disk (survives restarts).
+  7. Save state to disk (survives restarts).
 
 The broker-side stop is the real protection: if this process dies, every open
 trade still has its stop at the broker.
@@ -49,7 +54,8 @@ class Runner:
         for spec, _ in self.strats:
             for sym in spec.instruments:
                 cfg.instrument(sym)  # fail fast on unknown instruments
-        self.extra = {"last_signal_bar": {}, "open_ids": {}, "balance_at_open": {}}
+        self.extra = {"last_signal_bar": {}, "open_ids": {}, "balance_at_open": {},
+                      "known_ids": [], "entry_time": {}, "max_bars": {}}
         self.rm = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, cfg.starting_balance,
                               self._load_state())
         self.stopped = False
@@ -92,7 +98,13 @@ class Runner:
             self.notify.send(ev, logging.WARNING)
 
         positions = self.broker.positions()
-        self._detect_closed(positions, acct.balance)
+        self._detect_closed(positions, acct.balance, local)
+        if self.cfg.risk.guardian:
+            closed = self._guard(positions, local)
+            if closed:
+                actions += closed
+                positions = self.broker.positions()
+                acct = self.broker.account()
 
         flat_reason = self.rm.must_flatten(local)
         if flat_reason and positions:
@@ -101,14 +113,18 @@ class Runner:
             actions.append(f"flatten:{flat_reason}")
             positions = []
             acct = self.broker.account()
-            self._detect_closed(positions, acct.balance)
+            self._detect_closed(positions, acct.balance, local)
 
         held = {p.symbol for p in positions}
         for spec, strat in self.strats:
             for sym in spec.instruments:
                 if sym in held:
+                    if sym in self.extra["open_ids"]:
+                        res = self._manage_exit(spec, strat, sym, now)
+                        if res:
+                            actions.append(res)
                     continue
-                bars = self.broker.bars(sym, spec.timeframe, 400)
+                bars = self.broker.bars(sym, spec.timeframe, spec.history_bars)
                 if bars.empty:
                     continue
                 tf = pd.Timedelta(timeframe_to_offset(spec.timeframe))
@@ -131,6 +147,9 @@ class Runner:
                 actions.append(res)
                 if res.startswith("entered"):
                     held.add(sym)
+                    mb = row.get("max_bars", np.nan)
+                    self.extra["entry_time"][sym] = str(now)
+                    self.extra["max_bars"][sym] = None if pd.isna(mb) else float(mb)
                     positions = self.broker.positions()
         self.save()
         return actions
@@ -154,6 +173,7 @@ class Runner:
         oid = self.broker.market_bracket(sym, side, qty, stop, target)
         self.rm.record_entry()
         self.extra["open_ids"][sym] = oid
+        self.extra["known_ids"] = list({*self.extra["known_ids"], *(p.id for p in self.broker.positions())})
         self.extra["balance_at_open"][sym] = self.broker.account().balance
         risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
         self.notify.send(
@@ -180,15 +200,89 @@ class Runner:
             self.save()
             return res
 
-    def _detect_closed(self, positions, balance: float) -> None:
+    def _detect_closed(self, positions, balance: float, local=None) -> None:
         open_syms = {p.symbol for p in positions}
+        when = local.to_pydatetime() if hasattr(local, "to_pydatetime") else local
         for sym in list(self.extra["open_ids"]):
             if sym not in open_syms:
                 pnl = balance - self.extra["balance_at_open"].get(sym, balance)
-                self.rm.record_close(pnl)
+                self.rm.record_close(pnl, when)
                 self.notify.send(f"Closed {sym}: P/L ${pnl:,.2f}")
-                self.extra["open_ids"].pop(sym, None)
-                self.extra["balance_at_open"].pop(sym, None)
+                for k in ("open_ids", "balance_at_open", "entry_time", "max_bars"):
+                    self.extra[k].pop(sym, None)
+        live_ids = {p.id for p in positions}
+        self.extra["known_ids"] = [i for i in self.extra["known_ids"] if i in live_ids]
+
+    # ------------------------------------------------------------ guardian
+    def _guard(self, positions, local) -> list[str]:
+        """Enforce the rules on EVERY position, including trades placed by hand."""
+        actions: list[str] = []
+        known = set(self.extra["known_ids"])
+        by_symbol: dict[str, list] = {}
+        for p in positions:
+            by_symbol.setdefault(p.symbol, []).append(p)
+        closed_ids: set[str] = set()
+
+        def kill(p, why: str) -> None:
+            if p.id in closed_ids:
+                return
+            self.broker.close_position(p.id)
+            closed_ids.add(p.id)
+            self.notify.send(f"GUARDIAN closed {p.symbol} {p.qty} lots ({why}).", logging.WARNING)
+            actions.append(f"guardian:{why}")
+
+        for p in positions:
+            if not p.has_stop:
+                kill(p, "no stop-loss")
+            elif p.qty > self.cfg.risk.max_lots + 1e-9:
+                kill(p, f"size {p.qty} > max {self.cfg.risk.max_lots} lots")
+        # no adding: only the oldest position per symbol may stay
+        for sym, ps in by_symbol.items():
+            ps = sorted(ps, key=lambda x: (x.opened or pd.Timestamp.min.tz_localize("UTC")))
+            for extra in ps[1:]:
+                kill(extra, "adding to an open position")
+        # new manual trades must pass the same entry rules as the bot
+        survivors = [p for p in positions if p.id not in closed_ids]
+        for p in survivors:
+            if p.id in known:
+                continue
+            others = len([q for q in survivors if q.id != p.id and q.id in known])
+            ok, why = self.rm.check_entry(local.to_pydatetime(), others)
+            if ok:
+                self.rm.record_entry()
+                known.add(p.id)
+                self.extra["open_ids"].setdefault(p.symbol, p.id)
+                self.extra["balance_at_open"].setdefault(p.symbol, self.broker.account().balance)
+                self.notify.send(f"Manual trade accepted: {p.symbol} {p.qty} lots (counts toward today's limits).")
+            else:
+                kill(p, f"manual trade blocked: {why}")
+        self.extra["known_ids"] = sorted(known - closed_ids)
+        return actions
+
+    # ------------------------------------------------------------ exits
+    def _manage_exit(self, spec, strat, sym: str, now: pd.Timestamp) -> str | None:
+        if sym not in self.extra["entry_time"]:
+            return None  # not a bot entry (e.g. an accepted manual trade): leave it to the trader
+        positions = [p for p in self.broker.positions() if p.symbol == sym]
+        if not positions:
+            return None
+        pos = positions[0]
+        tf = pd.Timedelta(timeframe_to_offset(spec.timeframe))
+        mb = self.extra["max_bars"].get(sym)
+        et = self.extra["entry_time"].get(sym)
+        if mb and et and now - pd.Timestamp(et) >= tf * mb:
+            self.broker.close_position(pos.id)
+            self.notify.send(f"Time exit {sym} after {mb:.0f} bars.")
+            return "exit:time"
+        bars = self.broker.bars(sym, spec.timeframe, spec.history_bars)
+        if bars.empty:
+            return None
+        ex = int(strat.generate(bars)["exit"].iloc[-1])
+        if ex != 0 and ex in (2, pos.side):
+            self.broker.close_position(pos.id)
+            self.notify.send(f"Strategy exit {sym} ({spec.name}).")
+            return "exit:signal"
+        return None
 
     # ------------------------------------------------------------ loop
     def run_forever(self, poll_seconds: int = 5, max_errors: int = 5) -> None:

@@ -48,6 +48,9 @@ class RiskSettings:
     max_open_positions: int = 1
     max_lots: float = 5.0
     max_room_fraction_per_trade: float = 0.5
+    cooldown_after_loss_minutes: int = 15     # no new entry this long after a losing trade
+    max_sizing_equity: float | None = None    # never size from more than this (e.g. own money, no bonus)
+    guardian: bool = True                     # police ALL positions on the account, incl. manual ones
 
 
 @dataclass
@@ -81,6 +84,7 @@ class StrategySpec:
     name: str
     instruments: list[str]
     timeframe: str = "5m"
+    history_bars: int = 600   # bars fetched each cycle in live trading
     params: dict[str, Any] = field(default_factory=dict)
 
 

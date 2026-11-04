@@ -15,6 +15,12 @@ A rule-based intraday trading system for index CFDs (NAS100, US500, US30) on
   the risk engine stops the bot at 70% of each firm limit (configurable). It
   should never touch the real limit.
 
+## Status (2026-11-04)
+- Connected to GatesFX TradeLocker **demo** #2594911 ($10k). Guardian mode live-verified.
+- Rules tuned to the leaks in the real trade history: `docs/RESULTS_SMC_2026-11-04.md`.
+- Strategy research so far: **no proven edge** (`docs/RESULTS_*.md`). The trader's own
+  model (`liquidity_fvg`) runs on demo as a forward test only.
+
 ## What it does
 
 | Piece | File | What it's for |
@@ -27,6 +33,7 @@ A rule-based intraday trading system for index CFDs (NAS100, US500, US30) on
 | Live runner | `atlas_trader/runner.py` | Runs 24/7. Uses completed bars only and attaches a broker-side SL/TP to every order. Flat every day by 15:50 ET. State survives restarts. |
 | TradeLocker | `atlas_trader/brokers/tradelocker.py` | Official SDK. Demo by default. Live trading needs two separate opt-ins. |
 | TradingView alerts | `atlas_trader/webhook.py` | Your own TradingView setups can trigger trades, still through the risk engine. |
+| Guardian | `runner.py` | Polices every position on the account, manual ones included: closes trades with no stop, add-ons, oversize trades, and anything opened during a cooldown or halt. |
 | Kill switch | `state/KILL` | Create this file and the bot closes everything and stops. |
 | Alerts | `notify.py` | Telegram and/or Discord messages for every entry, exit and halt. |
 

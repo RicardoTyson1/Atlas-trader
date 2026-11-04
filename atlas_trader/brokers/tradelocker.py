@@ -15,7 +15,6 @@ from .base import Account, Broker, Position
 
 log = logging.getLogger(__name__)
 
-_LOOKBACK = {"1m": "2D", "5m": "5D", "15m": "10D", "30m": "15D", "1H": "30D", "4H": "90D", "1D": "365D"}
 
 
 class TradeLockerBroker(Broker):
@@ -50,15 +49,13 @@ class TradeLockerBroker(Broker):
         return self._ids[symbol]
 
     def bars(self, symbol: str, timeframe: str, count: int) -> pd.DataFrame:
-        raw = self.api.get_price_history(self._iid(symbol), resolution=timeframe,
-                                         lookback_period=_LOOKBACK.get(timeframe, "5D"))
-        if raw is None or raw.empty:
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-        df = raw.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
-        df.index = pd.to_datetime(df["t"], unit="ms", utc=True)
-        df = normalize(df.drop(columns=["t"]))
-        step = pd.Timedelta(df.index[1] - df.index[0]) if len(df) > 1 else pd.Timedelta(minutes=1)
+        step = pd.Timedelta(timeframe_to_offset(timeframe))
         now = pd.Timestamp.now(tz="UTC")
+        # markets close at weekends/daily breaks, so ask for extra calendar time
+        start = now - step * int(count * 1.5) - pd.Timedelta(days=3)
+        df = self.history(symbol, timeframe, start, now, pause=0.0)
+        if df.empty:
+            return df
         df = df[df.index + step <= now]   # completed bars only
         return df.tail(count)
 
@@ -107,9 +104,12 @@ class TradeLockerBroker(Broker):
         for _, r in df.iterrows():
             iid = int(r["tradableInstrumentId"])
             sym = names.get(iid) or self.api.get_symbol_name_from_instrument_id(iid)
+            sl = r.get("stopLossId")
+            has_stop = sl is not None and not pd.isna(sl) and str(sl) not in ("0", "", "None")
+            opened = pd.to_datetime(int(r["openDate"]), unit="ms", utc=True) if r.get("openDate") else None
             out.append(Position(
                 id=str(r["id"]), symbol=sym, side=1 if r["side"] == "buy" else -1,
-                qty=float(r["qty"]), entry=float(r["avgPrice"]),
+                qty=float(r["qty"]), entry=float(r["avgPrice"]), has_stop=has_stop, opened=opened,
             ))
         return out
 
@@ -122,6 +122,9 @@ class TradeLockerBroker(Broker):
         if oid is None:
             raise RuntimeError(f"Order rejected for {symbol}")
         return str(oid)
+
+    def close_position(self, position_id: str) -> None:
+        self.api.close_position(position_id=int(position_id))
 
     def close_all(self, symbol: str | None = None) -> None:
         self.api.close_all_positions(instrument_id_filter=self._iid(symbol) if symbol else 0)

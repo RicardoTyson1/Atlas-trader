@@ -82,7 +82,8 @@ class SimBroker(Broker):
             raise RuntimeError("SimBroker supports one position per symbol")
         px = self._mark(symbol)
         pid = str(next(self._ids))
-        self._pos[symbol] = Position(pid, symbol, side, qty, px, stop, target)
+        self._pos[symbol] = Position(pid, symbol, side, qty, px, stop, target,
+                                     has_stop=stop is not None, opened=self.now)
         self.fills.append({"time": self.now, "symbol": symbol, "side": side, "qty": qty, "price": px, "action": "open"})
         return pid
 
@@ -91,6 +92,18 @@ class SimBroker(Broker):
         pnl = p.side * (price - p.entry) * p.qty * self.vpp.get(symbol, 1.0)
         self.balance += pnl
         self.fills.append({"time": ts, "symbol": symbol, "side": -p.side, "qty": p.qty, "price": price, "action": "close", "pnl": pnl})
+
+    def close_position(self, position_id: str) -> None:
+        for s, p in list(self._pos.items()):
+            if p.id == position_id:
+                self._close(s, self._mark(s), self.now)
+
+    def add_manual(self, symbol: str, side: int, qty: float, stop: float | None = None) -> str:
+        """Test helper: a position opened by hand (outside the bot)."""
+        pid = f"m{next(self._ids)}"
+        self._pos[symbol] = Position(pid, symbol, side, qty, self._mark(symbol), stop, None,
+                                     has_stop=stop is not None, opened=self.now)
+        return pid
 
     def close_all(self, symbol: str | None = None) -> None:
         for s in list(self._pos):

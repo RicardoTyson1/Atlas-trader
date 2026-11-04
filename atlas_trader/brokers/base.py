@@ -22,6 +22,8 @@ class Position:
     entry: float
     stop: float | None = None
     target: float | None = None
+    has_stop: bool = True
+    opened: pd.Timestamp | None = None
 
 
 class Broker(ABC):
@@ -41,6 +43,9 @@ class Broker(ABC):
 
     @abstractmethod
     def close_all(self, symbol: str | None = None) -> None: ...
+
+    @abstractmethod
+    def close_position(self, position_id: str) -> None: ...
 
     def last_price(self, symbol: str, timeframe: str = "1m") -> float:
         return float(self.bars(symbol, timeframe, 1)["close"].iloc[-1])

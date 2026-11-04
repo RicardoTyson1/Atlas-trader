@@ -106,7 +106,7 @@ def run_backtest(
         pos.exit_time, pos.exit, pos.reason = idx[i], fill, reason
         pos.pnl = pnl - inst.commission_per_lot * pos.lots  # include entry commission in trade pnl
         pos.r = pos.side * (fill - pos.entry) / risk_pts if risk_pts else 0.0
-        rm.record_close(pos.pnl)
+        rm.record_close(pos.pnl, close_local[i].to_pydatetime())
         trades.append(pos)
         pos = None
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .config import Instrument, NewsBlackouts, PropRules, RiskSettings, Session
@@ -36,6 +36,7 @@ class RiskState:
     target_hit_on: str | None = None
     trading_days: list[str] = field(default_factory=list)
     last_equity: float = 0.0
+    cooldown_until: str | None = None  # ISO timestamp
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -170,6 +171,8 @@ class RiskManager:
             return False, "outside entry window"
         if self.news.active(ts_local):
             return False, "news blackout"
+        if self.s.cooldown_until and ts_local < datetime.fromisoformat(self.s.cooldown_until):
+            return False, f"cooldown after loss until {self.s.cooldown_until[11:16]}"
         if self.s.trades_today >= self.risk.max_trades_per_day:
             return False, "max trades per day reached"
         if self.s.consec_losses >= self.risk.max_consecutive_losses:
@@ -197,7 +200,9 @@ class RiskManager:
         """Lots to trade so a stop-out loses at most the allowed amount. 0 = don't trade."""
         if entry == stop or equity <= 0:
             return 0.0
-        budget = equity * self.risk.risk_per_trade_pct / 100.0
+        sizing_base = min(equity, self.risk.max_sizing_equity) if self.risk.max_sizing_equity else equity
+        budget = sizing_base * self.risk.risk_per_trade_pct / 100.0
+        # room to the halt levels is measured on the REAL equity
         room = min(equity - self.daily_floor(), equity - self.dd_floor())
         budget = min(budget, room * self.risk.max_room_fraction_per_trade)
         if budget <= 0:
@@ -217,8 +222,11 @@ class RiskManager:
         if self.s.day and self.s.day not in self.s.trading_days:
             self.s.trading_days.append(self.s.day)
 
-    def record_close(self, pnl: float) -> None:
+    def record_close(self, pnl: float, when: datetime | None = None) -> None:
         self.s.consec_losses = self.s.consec_losses + 1 if pnl < 0 else 0
+        if pnl < 0 and when is not None and self.risk.cooldown_after_loss_minutes > 0:
+            until = when + timedelta(minutes=self.risk.cooldown_after_loss_minutes)
+            self.s.cooldown_until = until.isoformat()
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -231,6 +239,7 @@ class RiskManager:
             "target_balance": round(self.target_balance(), 2),
             "trades_today": self.s.trades_today,
             "consec_losses": self.s.consec_losses,
+            "cooldown_until": self.s.cooldown_until,
             "halt": self.halted,
             "breached": self.s.breached,
         }
