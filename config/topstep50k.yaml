@@ -68,6 +68,11 @@ webhook:
   port: 8787
   default_reward_risk: 2.0
 
+monitoring:
+  label: "Atlas $50k guardian"            # prefix on every Telegram message
+  healthcheck_env: HEALTHCHECK_URL_TOPSTEP50K      # env var holding this bot's healthchecks.io ping URL
+  daily_report: true          # morning "armed" message + end-of-day report
+
 paths:
   state_dir: state/topstep50k
   log_dir: logs

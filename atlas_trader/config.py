@@ -113,6 +113,7 @@ class Config:
     tradelocker: dict[str, str]
     webhook: dict[str, Any]
     paths: dict[str, str]
+    monitoring: dict[str, Any] = field(default_factory=dict)
 
     def instrument(self, symbol: str) -> Instrument:
         if symbol not in self.instruments:
@@ -162,4 +163,5 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         tradelocker=raw.get("tradelocker") or {},
         webhook=raw.get("webhook") or {},
         paths=raw.get("paths") or {},
+        monitoring=raw.get("monitoring") or {},
     )

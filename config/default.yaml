@@ -114,6 +114,11 @@ webhook:
   # TradingView alerts are executed through the same risk engine.
   default_reward_risk: 2.0
 
+monitoring:
+  label: "Atlas $10k bot"            # prefix on every Telegram message
+  healthcheck_env: HEALTHCHECK_URL      # env var holding this bot's healthchecks.io ping URL
+  daily_report: true          # morning "armed" message + end-of-day report
+
 paths:
   state_dir: state
   log_dir: logs
