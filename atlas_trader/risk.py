@@ -118,8 +118,13 @@ class RiskManager:
             if mark > self.s.high_water:
                 self.s.high_water = mark
 
+        daily_hit = equity <= self.daily_floor(real=True)
+        if daily_hit and not self.prop.daily_breach_permanent and self.s.day_halt is None:
+            # personal account: the daily limit means "done for today", not "account over"
+            self.s.day_halt = f"{when} DAILY LOSS LIMIT hit (equity {equity:,.2f}). Done for today."
+            events.append(self.s.day_halt)
         if self.s.breached is None:
-            if equity <= self.daily_floor(real=True):
+            if daily_hit and self.prop.daily_breach_permanent:
                 self.s.breached = f"{when} DAILY LOSS LIMIT BREACHED (equity {equity:,.2f})"
             elif equity <= self.dd_floor(real=True):
                 self.s.breached = f"{when} MAX DRAWDOWN BREACHED (equity {equity:,.2f})"

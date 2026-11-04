@@ -103,3 +103,84 @@ def test_guardian_blocks_manual_trade_during_cooldown(cfg):
     acts = runner.step(t)
     assert any("cooldown" in a for a in acts)
     assert not broker.positions()
+
+
+# ---- regression tests for the 2026-11-04 review ---------------------------------
+
+def test_close_and_reopen_between_polls_still_triggers_cooldown(cfg):
+    """Review #2: closing a loser and opening a new trade on the same symbol between
+    two polls must still record the loss, start the cooldown and block the new trade."""
+    cfg.strategies = []
+    base, broker, runner, t = _guard_setup(cfg)
+    first = broker.add_manual("NAS100", 1, 1.0, stop=1.0)
+    runner.step(t)
+    assert first in runner.tracked
+    broker._close("NAS100", broker._pos["NAS100"].entry - 100, t)   # -$100 loss
+    second = broker.add_manual("NAS100", 1, 1.0, stop=1.0)
+    acts = runner.step(t + pd.Timedelta(minutes=1))
+    assert runner.rm.s.cooldown_until is not None
+    assert runner.rm.s.consec_losses == 1
+    assert any("cooldown" in a for a in acts)
+    assert second not in [p.id for p in broker.positions()]
+
+
+def test_bot_position_not_yet_tracked_is_reattached_not_closed(cfg):
+    """Review #4: a bot-tagged position the runner lost track of must be adopted, not killed."""
+    cfg.strategies = []
+    base, broker, runner, t = _guard_setup(cfg)
+    late = (base.index[0] + pd.Timedelta(hours=5, minutes=40)).tz_convert("UTC")   # 15:10: after last_entry, before flat_by
+    broker.set_time(late)
+    pid = broker.market_bracket("NAS100", 1, 1.0, stop=1.0, target=10**9)  # tagged "atlas"
+    acts = runner.step(late)
+    assert not any(a.startswith("guardian") for a in acts)
+    assert pid in runner.tracked and runner.tracked[pid]["bot"]
+
+
+def test_personal_daily_limit_is_a_day_stop_not_permanent(cfg):
+    """Review #5: with daily_breach_permanent false, -2% = done for today only."""
+    from atlas_trader.risk import RiskManager
+    cfg.prop.daily_breach_permanent = False
+    cfg.prop.safety_buffer = 1.0
+    rm = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, 50000)
+    rm.new_day("2025-01-06", 50000)
+    rm.update(47000, 47000)              # below the -4% daily floor
+    assert rm.s.day_halt and not rm.s.breached and not rm.s.hard_halt
+    rm.new_day("2025-01-07", 47000)
+    assert rm.halted is None
+
+
+def test_close_failure_raises_loud_alert(cfg):
+    """A close that never happens must produce a CRITICAL alert, not silence."""
+    cfg.strategies = []
+    base, broker, runner, t = _guard_setup(cfg)
+    runner.close_timeout_seconds = 0.05
+    runner.close_poll_seconds = 0.01
+    broker.close_position = lambda pid: None      # broker ignores closes
+    broker.close_all = lambda symbol=None: None
+    broker.add_manual("NAS100", 1, 1.0, stop=None)
+    runner.step(t)
+    assert any("COULD NOT CLOSE" in m for m in runner.notify.messages)
+
+
+def test_daily_armed_and_end_of_day_reports(cfg):
+    cfg.strategies = []
+    base = synthetic_intraday(days=1, seed=5)
+    broker = SimBroker({"NAS100": base}, cfg.starting_balance, {"NAS100": 1.0})
+    runner = Runner(cfg, broker, MemoryNotifier())
+    for ts in (base.index[30], base.index[-1] + pd.Timedelta(minutes=1)):
+        broker.set_time(ts)
+        runner.step(ts)
+    msgs = " ".join(runner.notify.messages)
+    assert "Good morning" in msgs and "Day report" in msgs
+
+
+def test_entry_uses_live_quote_not_bar_close(cfg):
+    base, broker, runner = make(cfg, days=2)
+    seen = {}
+    real_quote = broker.quote
+    def q(sym):
+        seen["called"] = True
+        return real_quote(sym)
+    broker.quote = q
+    drive(base, broker, runner)
+    assert seen.get("called")

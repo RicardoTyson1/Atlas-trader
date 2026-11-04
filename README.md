@@ -16,7 +16,8 @@ A rule-based intraday trading system for index CFDs (NAS100, US500, US30) on
   should never touch the real limit.
 
 ## Status (2026-11-04)
-- Connected to GatesFX TradeLocker **demo** #2594911 ($10k). Guardian mode live-verified.
+- Connected to GatesFX TradeLocker **demo** #2594911 ($10k). 11/11 live checks pass; see
+  `docs/HOW_TO_TELL_ITS_WORKING.md` for how to know it is running.
 - Rules tuned to the leaks in the real trade history: `docs/RESULTS_SMC_2026-11-04.md`.
 - Strategy research so far: **no proven edge** (`docs/RESULTS_*.md`). The trader's own
   model (`liquidity_fvg`) runs on demo as a forward test only.

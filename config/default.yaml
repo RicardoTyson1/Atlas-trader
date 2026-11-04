@@ -22,7 +22,8 @@ prop_rules:
   trailing_on: equity
   trail_locks_at_initial: true
   min_trading_days: 0
-  safety_buffer: 1.0              # these ARE the personal limits (no extra buffer)
+  safety_buffer: 0.9              # bot stops at 90% of each limit (equity is only checked between polls)
+  daily_breach_permanent: false   # hitting -2% = done for today, NOT a permanent stop
 
 risk:
   risk_per_trade_pct: 0.5         # max loss per trade = 0.5% of account ($50 on $10k)

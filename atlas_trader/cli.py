@@ -173,7 +173,9 @@ def cmd_run(args, cfg: Config) -> None:
         if cfg.mode != "live" or not args.i_accept_real_money_risk:
             sys.exit("Live trading needs `mode: live` in the config AND --i-accept-real-money-risk.")
         url = cfg.tradelocker.get("live_url", "https://live.tradelocker.com")
-        allowed = cfg.tradelocker.get("live_account_ids") or None
+        allowed = cfg.tradelocker.get("live_account_ids") or []
+        if not allowed:
+            sys.exit("Live mode needs `tradelocker.live_account_ids` in the config.")
     else:
         url = cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com")
         allowed = cfg.tradelocker.get("demo_account_ids") or []
@@ -181,19 +183,23 @@ def cmd_run(args, cfg: Config) -> None:
             sys.exit("Demo mode needs `tradelocker.demo_account_ids` in the config, so the bot can "
                      "never attach to a real-money account by mistake.")
     cfg.mode = mode  # label alerts/logs with the mode actually running
-    allowed_ids = [int(a) for a in allowed] if allowed else None
-    # each config pins its own account, so several bots can share one .env login
-    broker = TradeLockerBroker(url, account_id=allowed_ids[0] if allowed_ids else None,
-                               allowed_account_ids=allowed_ids)
-    runner = Runner(cfg, broker, Notifier())
+    allowed_ids = [int(a) for a in allowed]
+    mon = cfg.monitoring
+    notifier = Notifier(label=mon.get("label", "Atlas"), healthcheck_env=mon.get("healthcheck_env", "HEALTHCHECK_URL"))
+    try:
+        # each config pins its own account, so several bots can share one .env login
+        broker = TradeLockerBroker(url, account_id=allowed_ids[0], allowed_account_ids=allowed_ids)
+        runner = Runner(cfg, broker, notifier)
+    except Exception as e:
+        notifier.send(f"FAILED TO START: {e!r}. Will retry in 5 minutes.", logging.CRITICAL)
+        notifier.heartbeat(False, repr(e))
+        raise
     if args.webhook:
         threading.Thread(
             target=serve, args=(runner, cfg.webhook.get("host", "0.0.0.0"), int(cfg.webhook.get("port", 8787))),
             daemon=True,
         ).start()
-    runner.run_forever()
-    if runner.stop_reason == "errors":
-        sys.exit(1)  # non-zero so the service manager restarts the bot after a pause
+    runner.run_forever()  # returns only after the kill switch
 
 
 def cmd_download(args, cfg: Config) -> None:
@@ -216,8 +222,29 @@ def cmd_download(args, cfg: Config) -> None:
 
 
 def cmd_status(args, cfg: Config) -> None:
+    """Plain-English health check from the bot's saved state."""
+    import time as _t
+
     p = Path(cfg.paths.get("state_dir", "state")) / "runner_state.json"
-    print(p.read_text() if p.exists() else "No state yet (bot has not run).")
+    if not p.exists():
+        print("No state yet: the bot has not run with this config.")
+        return
+    raw = json.loads(p.read_text())
+    r, x = raw["risk"], raw.get("extra", {})
+    age = _t.time() - p.stat().st_mtime
+    alive = age < 180
+    print(f"Bot: {cfg.monitoring.get('label', 'Atlas')}  ({args.config})")
+    print(f"  Last check-in : {age:,.0f} s ago -> {'ALIVE' if alive else 'NOT CHECKING IN (is the service running?)'}")
+    print(f"  Equity        : ${r.get('last_equity', 0):,.2f}   (start of day ${r.get('sod_balance', 0):,.2f})")
+    print(f"  Trades today  : {r.get('trades_today', 0)} / {cfg.risk.max_trades_per_day}   losses in a row: {r.get('consec_losses', 0)}")
+    print(f"  Cooldown until: {r.get('cooldown_until') or '-'}")
+    print(f"  Halt          : {r.get('hard_halt') or r.get('day_halt') or 'none'}")
+    print(f"  Limit breached: {r.get('breached') or 'no'}")
+    tracked = x.get("tracked", {})
+    print(f"  Open positions: {len(tracked)}" + "".join(
+        f"\n    - {t['symbol']} ({'bot' if t['bot'] else 'manual'}) id {pid}" for pid, t in tracked.items()))
+    kill = Path(cfg.paths.get("kill_switch_file", "state/KILL"))
+    print(f"  Kill switch   : {'ON (bot will flatten and stop)' if kill.exists() else 'off'}")
 
 
 def cmd_reset_halt(args, cfg: Config) -> None:
@@ -228,8 +255,11 @@ def cmd_reset_halt(args, cfg: Config) -> None:
     rm = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, cfg.starting_balance, RiskState.from_dict(raw["risk"]))
     rm.reset_hard_halt()
     raw["risk"] = rm.s.to_dict()
-    p.write_text(json.dumps(raw, indent=2))
-    print("Hard halt cleared. Review what caused it before restarting.")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(raw, indent=2))
+    tmp.replace(p)
+    print("Hard halt cleared. Restart the bot service so it loads the change "
+          "(a running bot would overwrite this file).")
 
 
 def main(argv: list[str] | None = None) -> None:

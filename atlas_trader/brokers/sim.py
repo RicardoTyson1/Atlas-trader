@@ -38,14 +38,14 @@ class SimBroker(Broker):
             for ts, bar in window.iterrows():
                 hit = None
                 if p.side == 1:
-                    if bar.low <= p.stop:
+                    if p.stop is not None and bar.low <= p.stop:
                         hit = p.stop
-                    elif bar.high >= p.target:
+                    elif p.target is not None and bar.high >= p.target:
                         hit = p.target
                 else:
-                    if bar.high >= p.stop:
+                    if p.stop is not None and bar.high >= p.stop:
                         hit = p.stop
-                    elif bar.low <= p.target:
+                    elif p.target is not None and bar.low <= p.target:
                         hit = p.target
                 if hit is not None:
                     self._close(sym, hit, ts)
@@ -83,7 +83,7 @@ class SimBroker(Broker):
         px = self._mark(symbol)
         pid = str(next(self._ids))
         self._pos[symbol] = Position(pid, symbol, side, qty, px, stop, target,
-                                     has_stop=stop is not None, opened=self.now)
+                                     has_stop=stop is not None, opened=self.now, tag="atlas")
         self.fills.append({"time": self.now, "symbol": symbol, "side": side, "qty": qty, "price": px, "action": "open"})
         return pid
 

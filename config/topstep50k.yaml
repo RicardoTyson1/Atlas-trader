@@ -20,6 +20,7 @@ prop_rules:
   trail_locks_at_initial: true
   min_trading_days: 0
   safety_buffer: 0.5              # bot stops at $500 down on the day / $1,000 of the $2,000 MLL
+  daily_breach_permanent: false   # Topstep's DLL pauses the day; the MLL is what fails the account
 
 risk:
   risk_per_trade_pct: 0.4         # $200 max loss per trade (10 losers before the MLL)
@@ -77,4 +78,4 @@ paths:
   state_dir: state/topstep50k
   log_dir: logs
   report_dir: reports
-  kill_switch_file: state/KILL
+  kill_switch_file: state/topstep50k/KILL   # separate switch per bot

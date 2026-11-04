@@ -6,6 +6,7 @@ and run it 24/7 on your GatesFX TradeLocker **DEMO** account with Telegram alert
 ## Before you start, log in yourself to:
 1. DigitalOcean (cloud.digitalocean.com), with a payment method added
 2. Telegram Web (web.telegram.org)
+3. healthchecks.io (free account; sign up with your email first)
 
 Claude never types your passwords. Steps marked **[YOU]** are yours.
 Paste everything in the box below into Claude in Chrome.
@@ -33,6 +34,13 @@ PHASE 1: TELEGRAM ALERTS (Telegram Web)
 3. Open a chat with @userinfobot, send /start, and record the numeric Id it replies with
    (TELEGRAM_CHAT_ID; it is not secret).
 4. Open my new bot's chat and press Start.
+
+PHASE 1B: DEAD-MAN'S SWITCH (healthchecks.io)
+1. In healthchecks.io, add a check named "Atlas 10k bot".
+   Schedule: Simple. Period: 5 minutes. Grace time: 10 minutes. Save.
+2. In "Integrations", add Telegram (follow its instructions) and keep Email on.
+3. The check shows a "ping URL". DO NOT copy it. Tell me: [YOU] "Your ping URL is on the
+   check's page. You'll paste it in Phase 3 as HEALTHCHECK_URL."
 
 PHASE 2: CREATE THE SERVER (DigitalOcean)
 1. Create -> Droplets. Region: New York. Image: Ubuntu 24.04 LTS.
@@ -67,6 +75,7 @@ and fill in:
   TL_SERVER               = GATESFX
   TELEGRAM_BOT_TOKEN      = the token in the BotFather chat
   TELEGRAM_CHAT_ID        = <the Id from Phase 1>
+  HEALTHCHECK_URL         = the ping URL from healthchecks.io
 Leave TL_ACCOUNT_ID empty (each bot config picks its own demo account).
 Save with Ctrl+O, Enter, then exit with Ctrl+X. Tell me when done."
 Never display or read back the .env file.
@@ -104,7 +113,7 @@ PROBLEMS:
 |---|---|
 | Is it running? | `systemctl status atlas@default --no-pager` |
 | Live log | `journalctl -u atlas@default -f` (Ctrl+C to exit) |
-| Risk status | `cd /opt/atlas-trader && sudo -u atlas .venv/bin/atlas status` |
+| Health + risk status | `cd /opt/atlas-trader && sudo -u atlas .venv/bin/atlas status` |
 | **Emergency stop** (flatten everything + stop) | `sudo -u atlas touch /opt/atlas-trader/state/KILL` |
 | Stop / start | `systemctl stop atlas@default` / `systemctl start atlas@default` |
 | Update to the newest code | `cd /opt/atlas-trader && sudo -u atlas git pull && systemctl restart atlas@default` |

@@ -28,6 +28,7 @@ class PropRules:
     trail_locks_at_initial: bool = True
     min_trading_days: int = 0
     safety_buffer: float = 0.70
+    daily_breach_permanent: bool = True   # prop firms: True (account fails). Personal: False (done for today)
 
     def __post_init__(self) -> None:
         if not 0 < self.safety_buffer <= 1:

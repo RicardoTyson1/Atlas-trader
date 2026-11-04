@@ -24,6 +24,7 @@ class Position:
     target: float | None = None
     has_stop: bool = True
     opened: pd.Timestamp | None = None
+    tag: str | None = None     # "atlas" on positions the bot opened
 
 
 class Broker(ABC):
@@ -46,6 +47,11 @@ class Broker(ABC):
 
     @abstractmethod
     def close_position(self, position_id: str) -> None: ...
+
+    def quote(self, symbol: str) -> tuple[float, float]:
+        """(bid, ask). Default: last 1m close for both."""
+        px = self.last_price(symbol)
+        return px, px
 
     def last_price(self, symbol: str, timeframe: str = "1m") -> float:
         return float(self.bars(symbol, timeframe, 1)["close"].iloc[-1])
