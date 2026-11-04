@@ -2,9 +2,12 @@ from .base import Strategy
 from .orb import OpeningRangeBreakout
 from .trend_pullback import TrendPullback
 from .vwap_reversion import VwapReversion
+from .session_breakout import SessionBreakout
+from .donchian_trend import DonchianTrend
+from .time_drift import TimeDrift
 
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion)
+    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift)
 }
 
 

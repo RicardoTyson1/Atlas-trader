@@ -91,3 +91,49 @@ def test_montecarlo_probabilities(cfg):
     assert mc.p_pass > 0.9
     bad = pd.DataFrame({"pnl": [-1500.0], "worst_intraday": [-1500.0]})
     assert simulate_challenge(bad, cfg.prop, 50000, paths=50).p_fail == 1.0
+
+
+def test_exit_signal_and_overnight(cfg):
+    import copy
+    c2 = copy.deepcopy(cfg)
+    c2.session.overnight = True
+    from datetime import time as _time
+    c2.session.last_entry = _time(23, 0)
+    inst = zero_cost(c2)
+
+    class EnterThenExit(Strategy):
+        name = "ete"
+        defaults = {}
+
+        def generate(self, df):
+            out = self._empty(df.index)
+            out.iloc[0, out.columns.get_loc("signal")] = 1
+            out.iloc[0, out.columns.get_loc("stop")] = 50.0
+            out.iloc[0, out.columns.get_loc("rr")] = 1000.0
+            out.iloc[3, out.columns.get_loc("exit")] = 1
+            return out
+
+    # bars run from 15:40 past the 15:50 flat time; overnight keeps the trade open
+    df = bars([(100, 100, 100, 100)] * 2 + [(101, 101, 101, 101)] * 4, start="2025-01-06 15:40")
+    t = run_backtest(df, EnterThenExit(c2.session), inst, c2).trades.iloc[0]
+    assert t.reason == "exit signal" and t.exit == 101
+
+
+def test_time_exit(cfg):
+    inst = zero_cost(cfg)
+
+    class Hold2(Strategy):
+        name = "h2"
+        defaults = {}
+
+        def generate(self, df):
+            out = self._empty(df.index)
+            out.iloc[0, out.columns.get_loc("signal")] = 1
+            out.iloc[0, out.columns.get_loc("stop")] = 50.0
+            out.iloc[0, out.columns.get_loc("rr")] = 1000.0
+            out.iloc[0, out.columns.get_loc("max_bars")] = 2
+            return out
+
+    df = bars([(100, 100, 100, 100)] * 6)
+    t = run_backtest(df, Hold2(cfg.session), inst, cfg).trades.iloc[0]
+    assert t.reason == "time exit" and t.bars == 2

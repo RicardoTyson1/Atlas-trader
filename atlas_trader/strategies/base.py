@@ -1,10 +1,12 @@
 """Strategy base class.
 
 A strategy turns bars into a signal frame aligned to the bars:
-    signal : +1 long, -1 short, 0 none   (decided at the CLOSE of that bar)
-    stop   : protective stop price
-    target : take-profit price, or NaN to use `rr` x risk from the actual fill
-    rr     : reward/risk multiple used when target is NaN
+    signal   : +1 long, -1 short, 0 none   (decided at the CLOSE of that bar)
+    stop     : protective stop price
+    target   : take-profit price, or NaN to use `rr` x risk from the actual fill
+    rr       : reward/risk multiple used when target is NaN
+    exit     : optional. 1 = close longs, -1 = close shorts, 2 = close any (at bar close)
+    max_bars : optional. close the trade after this many bars
 
 Rules every strategy must follow:
   * Only use data up to and including the current bar (tests enforce this).
@@ -27,6 +29,7 @@ def _mins(t) -> int:
 
 class Strategy:
     name: ClassVar[str] = "base"
+    uses_session_window: ClassVar[bool] = True  # entries limited to session trade_start..last_entry
     defaults: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, session: Session, **params: Any) -> None:
@@ -53,7 +56,8 @@ class Strategy:
     @staticmethod
     def _empty(index: pd.Index) -> pd.DataFrame:
         return pd.DataFrame(
-            {"signal": 0, "stop": np.nan, "target": np.nan, "rr": np.nan}, index=index
+            {"signal": 0, "stop": np.nan, "target": np.nan, "rr": np.nan, "exit": 0, "max_bars": np.nan},
+            index=index,
         )
 
     @staticmethod
@@ -66,8 +70,9 @@ class Strategy:
         short_bad |= (out["signal"] == -1) & tgt.notna() & ~(tgt < close)
         bad = long_bad | short_bad
         out.loc[bad, ["signal"]] = 0
-        out.loc[out["signal"] == 0, ["stop", "target", "rr"]] = np.nan
+        out.loc[out["signal"] == 0, ["stop", "target", "rr", "max_bars"]] = np.nan
         out["signal"] = out["signal"].astype(int)
+        out["exit"] = out["exit"].astype(int)
         return out
 
     def generate(self, df: pd.DataFrame) -> pd.DataFrame:  # pragma: no cover

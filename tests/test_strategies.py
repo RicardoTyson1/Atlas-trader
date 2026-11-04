@@ -27,7 +27,10 @@ def test_stops_on_correct_side(name, cfg, bars5):
 
 @pytest.mark.parametrize("name", sorted(REGISTRY))
 def test_signals_only_in_entry_window(name, cfg, bars5):
-    out = build_strategy(name, cfg.session).generate(bars5)
+    strat = build_strategy(name, cfg.session)
+    if not strat.uses_session_window:
+        pytest.skip("strategy defines its own time windows")
+    out = strat.generate(bars5)
     local = (out.index + __import__("pandas").Timedelta(minutes=5)).tz_convert(cfg.session.timezone)
     mins = local.hour * 60 + local.minute
     sig = out.signal.values != 0

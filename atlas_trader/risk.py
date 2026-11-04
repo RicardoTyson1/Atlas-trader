@@ -180,7 +180,7 @@ class RiskManager:
 
     def must_flatten(self, ts_local: datetime) -> str | None:
         m = ts_local.hour * 60 + ts_local.minute
-        if m >= _mins(self.session.flat_by):
+        if not self.session.overnight and m >= _mins(self.session.flat_by):
             return "end of session"
         if self.news.active(ts_local):
             return "news blackout"

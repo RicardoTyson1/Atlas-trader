@@ -39,6 +39,8 @@ class Trade:
     pnl: float = 0.0
     r: float = 0.0
     reason: str = ""
+    max_bars: float = float("nan")
+    bars: int = 0
 
 
 @dataclass
@@ -69,16 +71,22 @@ def run_backtest(
     sstop = sigs["stop"].to_numpy(float)
     stgt = sigs["target"].to_numpy(float)
     srr = sigs["rr"].to_numpy(float)
+    sexit = sigs["exit"].to_numpy(int) if "exit" in sigs else np.zeros(len(sigs), dtype=int)
+    smaxb = sigs["max_bars"].to_numpy(float) if "max_bars" in sigs else np.full(len(sigs), np.nan)
+    overnight = cfg.session.overnight
     days = d["day"].to_numpy()
     tz = cfg.session.tz
     bar_delta = (pd.Series(idx).diff().mode().iloc[0]) if n > 1 else pd.Timedelta(minutes=1)
+    open_local = idx.tz_convert(tz)
+    close_local = (idx + bar_delta).tz_convert(tz)
+    close_mins = (close_local.hour * 60 + close_local.minute).to_numpy()
     flat_m = _mins(cfg.session.flat_by)
     half_cost = inst.spread_points / 2 + inst.slippage_points
     vpp = inst.value_per_point
 
     balance = initial
     pos: Trade | None = None
-    pending: tuple[int, float, float, float] | None = None
+    pending: tuple[int, float, float, float, float] | None = None
     trades: list[Trade] = []
     equity = np.empty(n)
     events: list[str] = []
@@ -103,20 +111,21 @@ def run_backtest(
         pos = None
 
     for i in range(n):
-        ts_open_local = idx[i].tz_convert(tz)
-        ts_close_local = (idx[i] + bar_delta).tz_convert(tz)
+        ts_open_local = open_local[i]
+        ts_close_local = close_local[i]
         if days[i] != cur_day:
             if cur_day is not None:
                 day_rows.append({"day": cur_day, "start": day_start_bal, "end": balance, "min_equity": day_min_eq})
             cur_day = days[i]
-            pending = None
+            if not overnight:
+                pending = None
             rm.new_day(cur_day, balance)
             day_start_bal = balance
             day_min_eq = balance
 
         # 1) entry at this bar's open
         if pending is not None and pos is None:
-            side, stop, tgt, rr = pending
+            side, stop, tgt, rr, maxb = pending
             ok, _ = rm.check_entry(ts_open_local, open_positions=0)
             fill = o[i] + side * half_cost
             if ok and side * (fill - stop) > 0:
@@ -125,7 +134,7 @@ def run_backtest(
                     lots = rm.size(fill, stop, inst, balance)
                     if lots > 0:
                         balance -= inst.commission_per_lot * lots
-                        pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots)
+                        pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb)
                         rm.record_entry()
         pending = None
 
@@ -161,22 +170,33 @@ def run_backtest(
         for ev in rm.update(worst_eq, balance, when=str(ts_close_local)):
             events.append(ev)
 
-        # 4) forced flat: session end, news, risk halt, last bar of day/data
+        # 4) forced flat (session end, news, risk halt, end of day/data),
+        #    strategy exit signal, or time exit -> close at this bar's close
         if pos is not None:
-            last_of_day = i + 1 >= n or days[i + 1] != days[i]
+            pos.bars += 1
+            end_of_data = i + 1 >= n
             reason = rm.must_flatten(ts_close_local)
-            if reason is None and (ts_close_local.hour * 60 + ts_close_local.minute) >= flat_m:
-                reason = "end of session"
-            if reason or last_of_day:
-                close_pos(i, c[i], reason or "end of data/day")
+            if not overnight:
+                if reason is None and close_mins[i] >= flat_m:
+                    reason = "end of session"
+                if reason is None and (end_of_data or days[i + 1] != days[i]):
+                    reason = "end of data/day"
+            elif reason is None and end_of_data:
+                reason = "end of data"
+            if reason is None and sexit[i] != 0 and sexit[i] in (2, pos.side):
+                reason = "exit signal"
+            if reason is None and not np.isnan(pos.max_bars) and pos.bars >= pos.max_bars:
+                reason = "time exit"
+            if reason:
+                close_pos(i, c[i], reason)
 
         equity[i] = balance + (
             pos.side * (c[i] - pos.side * half_cost - pos.entry) * pos.lots * vpp if pos else 0.0
         )
 
         # 5) new signal at this bar's close
-        if pos is None and sig[i] != 0 and i + 1 < n and days[i + 1] == days[i]:
-            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]))
+        if pos is None and sig[i] != 0 and i + 1 < n and (overnight or days[i + 1] == days[i]):
+            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]))
 
     if cur_day is not None:
         day_rows.append({"day": cur_day, "start": day_start_bal, "end": balance, "min_equity": day_min_eq})

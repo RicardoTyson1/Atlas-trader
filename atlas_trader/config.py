@@ -58,6 +58,7 @@ class Session:
     last_entry: time = time(15, 0)
     flat_by: time = time(15, 50)
     weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
+    overnight: bool = False   # True = positions may be held past flat_by / overnight
 
     @property
     def tz(self) -> ZoneInfo:
@@ -129,6 +130,7 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         last_entry=_t(s.get("last_entry", "15:00")),
         flat_by=_t(s.get("flat_by", "15:50")),
         weekdays=tuple(s.get("weekdays", [0, 1, 2, 3, 4])),
+        overnight=bool(s.get("overnight", False)),
     )
     nb = raw.get("news_blackouts", {}) or {}
     events = [
