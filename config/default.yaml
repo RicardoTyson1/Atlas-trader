@@ -5,7 +5,7 @@
 mode: backtest            # backtest | demo | live   (live also needs --i-accept-real-money-risk)
 
 account:
-  starting_balance: 50000  # VERIFY: your prop account size
+  starting_balance: 1000   # GatesFX demo #2594596 balance (raise when the demo is resized)
   currency: USD
 
 # Prop-firm rules. The bot treats these as HARD limits and stops itself
@@ -72,6 +72,13 @@ instruments:
     spread_points: 2.5
     slippage_points: 1.0
     commission_per_lot: 0.0
+  XAUUSD.R:                       # GatesFX gold (from TradeLocker instrument panel, 2026-11-03)
+    value_per_point: 100.0        # lot size 100 oz -> $100 per $1.00 move per lot
+    min_lot: 0.01
+    lot_step: 0.01                # VERIFY (not shown in panel)
+    spread_points: 0.14           # 14 points = $0.14 (bid 3931.58 / ask 3931.72)
+    slippage_points: 0.10
+    commission_per_lot: 3.5       # $7.00 opening fee per lot, modelled as 3.5 per side
 
 # Which strategy runs on which instrument. Params override strategy defaults.
 strategies:
@@ -90,8 +97,13 @@ strategies:
   #   timeframe: 5m
 
 tradelocker:
-  demo_url: https://demo.tradelocker.com
+  # GatesFX hosts its DEMO accounts on the live.tradelocker.com environment
+  # (seen in the platform URL). The account-ID allowlist below is what keeps
+  # demo mode on the demo account.
+  demo_url: https://live.tradelocker.com
   live_url: https://live.tradelocker.com
+  demo_account_ids: [2594596]     # GatesFX TradeLocker DEMO #2594596
+  live_account_ids: []            # fill in only when going live
 
 webhook:
   host: 0.0.0.0

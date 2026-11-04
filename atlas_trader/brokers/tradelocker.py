@@ -20,7 +20,8 @@ _LOOKBACK = {"1m": "2D", "5m": "5D", "15m": "10D", "30m": "15D", "1H": "30D", "4
 
 class TradeLockerBroker(Broker):
     def __init__(self, environment_url: str, email: str | None = None, password: str | None = None,
-                 server: str | None = None, acc_num: int | None = None):
+                 server: str | None = None, acc_num: int | None = None,
+                 account_id: int | None = None, allowed_account_ids: list[int] | None = None):
         try:
             from tradelocker import TLAPI
         except ImportError as e:  # pragma: no cover
@@ -29,12 +30,19 @@ class TradeLockerBroker(Broker):
         password = password or os.environ.get("TL_PASSWORD")
         server = server or os.environ.get("TL_SERVER")
         acc = acc_num or int(os.environ.get("TL_ACC_NUM") or 0)
+        acc_id = account_id or int(os.environ.get("TL_ACCOUNT_ID") or 0)
         if not (email and password and server):
             raise RuntimeError("Set TL_EMAIL, TL_PASSWORD and TL_SERVER (see .env.example)")
         self.api = TLAPI(environment=environment_url, username=email, password=password,
-                         server=server, acc_num=acc, log_level="info")
+                         server=server, account_id=acc_id, acc_num=acc, log_level="info")
+        if allowed_account_ids is not None and int(self.api.account_id) not in allowed_account_ids:
+            raise RuntimeError(
+                f"Connected to account {self.api.account_id}, which is not in the allowed list "
+                f"{allowed_account_ids}. Refusing to trade. Set TL_ACCOUNT_ID to your demo account."
+            )
         self._ids: dict[str, int] = {}
-        log.info("Connected to TradeLocker %s account %s", environment_url, self.api.acc_num)
+        log.info("Connected to TradeLocker %s account id %s (accNum %s)",
+                 environment_url, self.api.account_id, self.api.acc_num)
 
     def _iid(self, symbol: str) -> int:
         if symbol not in self._ids:

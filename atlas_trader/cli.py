@@ -173,9 +173,14 @@ def cmd_run(args, cfg: Config) -> None:
         if cfg.mode != "live" or not args.i_accept_real_money_risk:
             sys.exit("Live trading needs `mode: live` in the config AND --i-accept-real-money-risk.")
         url = cfg.tradelocker.get("live_url", "https://live.tradelocker.com")
+        allowed = cfg.tradelocker.get("live_account_ids") or None
     else:
         url = cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com")
-    broker = TradeLockerBroker(url)
+        allowed = cfg.tradelocker.get("demo_account_ids") or []
+        if not allowed:
+            sys.exit("Demo mode needs `tradelocker.demo_account_ids` in the config, so the bot can "
+                     "never attach to a real-money account by mistake.")
+    broker = TradeLockerBroker(url, allowed_account_ids=[int(a) for a in allowed] if allowed else None)
     runner = Runner(cfg, broker, Notifier())
     if args.webhook:
         threading.Thread(
