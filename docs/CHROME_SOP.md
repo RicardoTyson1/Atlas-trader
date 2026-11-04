@@ -114,7 +114,7 @@ Now STOP and tell me: [YOU] "Run this in the console:
 and fill in:
   TL_EMAIL, TL_PASSWORD   = your TradeLocker DEMO login
   TL_SERVER               = <the server name from Phase 2>
-  TL_ACCOUNT_ID           = <the demo account number from Phase 2, e.g. 2594596>
+  TL_ACCOUNT_ID           = <the demo account number from Phase 2, e.g. 2594911>
   WEBHOOK_SECRET          = any long random text you make up
   TELEGRAM_BOT_TOKEN      = the token from the BotFather chat
   TELEGRAM_CHAT_ID        = <the Id from Phase 4>
@@ -123,7 +123,7 @@ Do not look at or read back the contents of .env.
 
 PHASE 7: CONNECTION TEST (after I say the .env is done)
   cd /opt/atlas-trader
-  sudo -u atlas .venv/bin/python -c "from atlas_trader.cli import _load_env; _load_env(); from atlas_trader.brokers.tradelocker import TradeLockerBroker as T; b=T('https://live.tradelocker.com', allowed_account_ids=[2594596]); print('ACCOUNT', b.account()); print(b.bars('NAS100','5m',3))"
+  sudo -u atlas .venv/bin/python -c "from atlas_trader.cli import _load_env; _load_env(); from atlas_trader.brokers.tradelocker import TradeLockerBroker as T; b=T('https://live.tradelocker.com', allowed_account_ids=[2594911]); print('ACCOUNT', b.account()); print(b.bars('NAS100','5m',3))"
 
 (Replace NAS100 with the exact symbol name from Phase 2 if different.)
 Expected: a line starting with ACCOUNT showing balance/equity, then 3 rows of prices.

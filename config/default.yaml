@@ -5,7 +5,7 @@
 mode: backtest            # backtest | demo | live   (live also needs --i-accept-real-money-risk)
 
 account:
-  starting_balance: 1000   # GatesFX demo #2594596 balance (raise when the demo is resized)
+  starting_balance: 1000   # VERIFY: set to the balance of GatesFX demo #2594911
   currency: USD
 
 # Prop-firm rules. The bot treats these as HARD limits and stops itself
@@ -102,7 +102,7 @@ tradelocker:
   # demo mode on the demo account.
   demo_url: https://live.tradelocker.com
   live_url: https://live.tradelocker.com
-  demo_account_ids: [2594596]     # GatesFX TradeLocker DEMO #2594596
+  demo_account_ids: [2594911]     # GatesFX TradeLocker DEMO #2594911 (server GATESFX)
   live_account_ids: []            # fill in only when going live
 
 webhook:
