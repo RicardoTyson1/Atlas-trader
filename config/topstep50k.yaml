@@ -12,28 +12,28 @@ prop_rules:
   firm: topstep-50k-practice
   phase: funded                   # no "target reached" stop (balance is already above $53k; Ricardo trades on)
   profit_target_pct: 6.0          # $3,000 target
-  daily_loss_pct: 2.0             # optional $1,000 DLL
+  daily_loss_pct: 1.0             # x safety_buffer 0.5 = bot day stop $250 (Ricardo, 2026-11-05; Topstep's own DLL is $1,000)
   daily_loss_basis: initial
   max_drawdown_pct: 4.0           # $2,000 maximum loss limit
   drawdown_type: trailing
   trailing_on: eod_balance        # trails end-of-day balance (Topstep style)
   trail_locks_at_initial: true
   min_trading_days: 0
-  safety_buffer: 0.5              # bot stops at $500 down on the day / $1,000 of the $2,000 MLL
+  safety_buffer: 0.5              # bot stops at $250 down on the day / $1,000 of the $2,000 MLL
   daily_breach_permanent: false   # Topstep's DLL pauses the day; the MLL is what fails the account
 
 risk:
-  risk_per_trade_pct: 0.4         # $200 max loss per trade (10 losers before the MLL)
+  risk_per_trade_pct: 0.1         # $50 max loss per trade (Ricardo, 2026-11-05)
   max_trades_per_day: 8
   max_consecutive_losses: 3
   max_open_positions: 1
-  max_lots: 1.0                   # = 10 micros (July: up to 31 micros)
+  max_lots: 0.1                   # Ricardo: 0.10 lots max (2026-11-05); bigger gets closed
   max_room_fraction_per_trade: 0.25
   cooldown_after_loss_minutes: 15 # July 15: re-entered 3 seconds after losses
   max_sizing_equity: 50000
   guardian: true
   guardian_auto_stop: true        # trade placed without a stop: after the grace time a stop is added at the
-  guardian_stop_grace_seconds: 30 # max loss per trade ($200) and the trade stays open (Ricardo, 2026-11-05)
+  guardian_stop_grace_seconds: 30 # max loss per trade ($50) and the trade stays open (Ricardo, 2026-11-05)
 
 session:
   timezone: America/New_York
