@@ -102,6 +102,7 @@ class SimBroker(Broker):
         for p in self._pos.values():
             if p.id == position_id:
                 p.stop = stop
+                p.has_stop = True
                 if target is not None:
                     p.target = target
                 return True
