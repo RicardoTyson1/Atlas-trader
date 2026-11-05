@@ -10,9 +10,11 @@ from .silver_bullet import SilverBullet
 from .break_retest import BreakRetest
 from .reversal_trail import ReversalTrail
 from .momentum_rsi import MomentumRSI
+from .trend_break import TrendBreakRetest
+from .zone_retest import ZoneRetest
 
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest, ReversalTrail, MomentumRSI)
+    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest, ReversalTrail, MomentumRSI, TrendBreakRetest, ZoneRetest)
 }
 
 
