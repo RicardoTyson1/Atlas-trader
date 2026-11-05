@@ -341,6 +341,29 @@ class Runner:
             self.notify.send(f"Weekly review failed: {e!r}", logging.ERROR)
         self.save()
 
+    def _max_loss_usd(self, balance: float, local) -> float:
+        r = self.cfg.risk
+        base = min(balance, r.max_sizing_equity) if r.max_sizing_equity else balance
+        when = local.to_pydatetime() if hasattr(local, "to_pydatetime") else local
+        return base * self.rm.risk_pct_at(when) / 100.0
+
+    def _attach_stop(self, p, balance: float, local) -> float | None:
+        """Put a stop on a trade placed without one, at the max loss per trade.
+        Returns the stop price, or None if price is already past that loss / the broker refused."""
+        if p.symbol not in self.cfg.instruments:
+            return None
+        inst = self.cfg.instrument(p.symbol)
+        per_point = p.qty * inst.value_per_point
+        if per_point <= 0:
+            return None
+        dist = self._max_loss_usd(balance, local) / per_point
+        stop = round(p.entry - p.side * dist, 2)
+        bid, ask = self.broker.quote(p.symbol)
+        exit_px = bid if p.side > 0 else ask
+        if p.side * (exit_px - stop) <= 0:
+            return None
+        return stop if self.broker.modify_stop(p.id, stop, p.target) else None
+
     # ------------------------------------------------------------ guardian
     def _guard(self, positions, balance: float, local) -> list[str]:
         """Enforce the rules on EVERY position, including trades placed by hand."""
@@ -354,7 +377,22 @@ class Runner:
                                       "max_bars": None, "strategy": "recovered"}
                 self.notify.send(f"Re-attached bot position {p.symbol} {p.qty} lots.")
         for p in positions:
-            if not p.has_stop:
+            if not p.has_stop and self.cfg.risk.guardian_auto_stop:
+                age = (pd.Timestamp(local) - p.opened).total_seconds() if p.opened is not None else None
+                if age is not None and age < self.cfg.risk.guardian_stop_grace_seconds:
+                    pass                               # still time to place your own stop
+                else:
+                    added = self._attach_stop(p, balance, local)
+                    if added is None:
+                        to_close[p.id] = "no stop-loss and it is already past the max loss"
+                    else:
+                        actions.append("guardian:stop added")
+                        self.notify.send(f"GUARDIAN added a stop to {p.symbol} {p.qty} lots at {added:.2f} "
+                                         f"(no stop after {self.cfg.risk.guardian_stop_grace_seconds:.0f}s; "
+                                         f"max loss ${self._max_loss_usd(balance, local):,.0f}).", logging.WARNING)
+                if p.qty > self.cfg.risk.max_lots + 1e-9:
+                    to_close[p.id] = f"size {p.qty} > max {self.cfg.risk.max_lots} lots"
+            elif not p.has_stop:
                 to_close[p.id] = "no stop-loss"
             elif p.qty > self.cfg.risk.max_lots + 1e-9:
                 to_close[p.id] = f"size {p.qty} > max {self.cfg.risk.max_lots} lots"
