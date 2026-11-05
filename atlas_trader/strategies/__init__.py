@@ -7,9 +7,10 @@ from .donchian_trend import DonchianTrend
 from .time_drift import TimeDrift
 from .liquidity_fvg import LiquidityFVG
 from .silver_bullet import SilverBullet
+from .break_retest import BreakRetest
 
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet)
+    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest)
 }
 
 
