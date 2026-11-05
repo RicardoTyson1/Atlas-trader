@@ -44,6 +44,9 @@ class Trade:
     init_stop: float = float("nan")
     trail_start_r: float = float("nan")   # start trailing once open profit >= this x initial risk
     trail_buf: float = 0.0                # room left beyond the pullback wick (price units)
+    spike_pts: float = float("nan")       # close on a candle with a body this big in our favor
+    spike_min_r: float = 1.0
+    spike_mode: int = 2                   # 1 = take the profit at the close, 2 = lock: stop to mid-candle
     stop_moves: int = 0
 
 
@@ -54,6 +57,54 @@ class BacktestResult:
     daily: pd.DataFrame        # per-day pnl and worst intraday drawdown from start-of-day
     stats: dict
     events: list[str] = field(default_factory=list)
+
+
+def trail_candidate(side: int, entry: float, init_stop: float, cur_stop: float, start_r: float,
+                    buf: float, o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray) -> float | None:
+    """Ricardo's candle trailing rule, shared by the backtester and the live runner.
+
+    `o/h/l/c` are the last 3 COMPLETED bars (oldest first). Once open profit at the last
+    close is >= start_r x initial risk, and a pullback candle (bar -2) is followed by a strong
+    candle in the trade's direction (bar -1, body >= 50% of range), the stop moves to just
+    beyond the pullback wick (+ buf of room). Returns the new stop, or None if no move.
+    The stop only ever moves in the trade's favor and stays on the right side of price.
+    """
+    if len(c) < 3 or np.isnan(start_r):
+        return None
+    risk0 = abs(entry - init_stop)
+    if risk0 <= 0 or side * (c[-1] - entry) < start_r * risk0:
+        return None
+    rng = h[-1] - l[-1]
+    strong = rng > 0 and side * (c[-1] - o[-1]) >= 0.5 * rng
+    counter_body = side * (c[-2] - o[-2]) < 0
+    dipped = l[-2] < l[-3] if side == 1 else h[-2] > h[-3]
+    if not (strong and (counter_body or dipped)):
+        return None
+    new = l[-2] - buf if side == 1 else h[-2] + buf
+    if side * (new - cur_stop) > 0 and side * (c[-1] - new) > 0:
+        return float(new)
+    return None
+
+
+def spike_exit(side: int, entry: float, init_stop: float, spike_pts: float, min_r: float,
+               o: float, c: float) -> bool:
+    """Take the big gain: the last completed candle moved hard in the trade's favor
+    (body >= spike_pts) and open profit is >= min_r x initial risk -> close at its close."""
+    if not spike_pts or np.isnan(spike_pts) or spike_pts <= 0:
+        return False
+    risk0 = abs(entry - init_stop)
+    return side * (c - o) >= spike_pts and risk0 > 0 and side * (c - entry) >= min_r * risk0
+
+
+def spike_lock(side: int, entry: float, init_stop: float, cur_stop: float, spike_pts: float,
+               min_r: float, o: float, c: float) -> float | None:
+    """Stay in the move, but bank most of an aggressive candle: if the last completed candle
+    moved hard in our favor (body >= spike_pts) while up >= min_r x risk, pull the stop up to
+    the middle of that candle. Never moves the stop backwards. Returns the new stop or None."""
+    if not spike_exit(side, entry, init_stop, spike_pts, min_r, o, c):
+        return None
+    new = (o + c) / 2
+    return float(new) if side * (new - cur_stop) > 0 and side * (c - new) > 0 else None
 
 
 def run_backtest(
@@ -79,6 +130,9 @@ def run_backtest(
     smaxb = sigs["max_bars"].to_numpy(float) if "max_bars" in sigs else np.full(len(sigs), np.nan)
     strail = sigs["trail_start_r"].to_numpy(float) if "trail_start_r" in sigs else np.full(len(sigs), np.nan)
     stbuf = sigs["trail_buf"].to_numpy(float) if "trail_buf" in sigs else np.zeros(len(sigs))
+    sspk = sigs["spike_pts"].to_numpy(float) if "spike_pts" in sigs else np.full(len(sigs), np.nan)
+    sspr = sigs["spike_min_r"].to_numpy(float) if "spike_min_r" in sigs else np.ones(len(sigs))
+    sspm = sigs["spike_mode"].to_numpy(float) if "spike_mode" in sigs else np.full(len(sigs), 2.0)
     overnight = cfg.session.overnight
     days = d["day"].to_numpy()
     tz = cfg.session.tz
@@ -131,7 +185,7 @@ def run_backtest(
 
         # 1) entry at this bar's open
         if pending is not None and pos is None:
-            side, stop, tgt, rr, maxb, trs, tbuf = pending
+            side, stop, tgt, rr, maxb, trs, tbuf, spk, spr, spm = pending
             ok, _ = rm.check_entry(ts_open_local, open_positions=0)
             fill = o[i] + side * half_cost
             if ok and side * (fill - stop) > 0:
@@ -141,7 +195,8 @@ def run_backtest(
                     if lots > 0:
                         balance -= inst.commission_per_lot * lots
                         pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb,
-                                    init_stop=stop, trail_start_r=trs, trail_buf=tbuf)
+                                    init_stop=stop, trail_start_r=trs, trail_buf=tbuf,
+                                    spike_pts=spk, spike_min_r=spr, spike_mode=spm)
                         rm.record_entry()
         pending = None
 
@@ -194,6 +249,9 @@ def run_backtest(
                 reason = "exit signal"
             if reason is None and not np.isnan(pos.max_bars) and pos.bars >= pos.max_bars:
                 reason = "time exit"
+            if reason is None and pos.spike_mode == 1 and spike_exit(pos.side, pos.entry, pos.init_stop,
+                                                                     pos.spike_pts, pos.spike_min_r, o[i], c[i]):
+                reason = "big candle profit"
             if reason:
                 close_pos(i, c[i], reason)
 
@@ -201,20 +259,17 @@ def run_backtest(
         #     once open profit >= trail_start_r x initial risk, after a pullback candle
         #     followed by a strong candle in the trade's direction, move the stop to just
         #     beyond the pullback candle's wick. The stop only ever moves in the trade's favor.
-        if pos is not None and not np.isnan(pos.trail_start_r) and i >= 1:
-            s_ = pos.side
-            risk0 = abs(pos.entry - pos.init_stop)
-            if s_ * (c[i] - pos.entry) >= pos.trail_start_r * risk0:
-                rng = h[i] - l[i]
-                strong = rng > 0 and s_ * (c[i] - o[i]) >= 0.5 * rng
-                counter_body = s_ * (c[i - 1] - o[i - 1]) < 0
-                dipped = i >= 2 and (l[i - 1] < l[i - 2] if s_ == 1 else h[i - 1] > h[i - 2])
-                pulled = counter_body or dipped
-                if strong and pulled:
-                    new = l[i - 1] - pos.trail_buf if s_ == 1 else h[i - 1] + pos.trail_buf
-                    if s_ * (new - pos.stop) > 0 and s_ * (c[i] - new) > 0:
-                        pos.stop = new
-                        pos.stop_moves += 1
+        if pos is not None and not np.isnan(pos.trail_start_r) and i >= 2:
+            new = trail_candidate(pos.side, pos.entry, pos.init_stop, pos.stop, pos.trail_start_r,
+                                  pos.trail_buf, o[i - 2:i + 1], h[i - 2:i + 1], l[i - 2:i + 1], c[i - 2:i + 1])
+            if new is not None:
+                pos.stop = new
+                pos.stop_moves += 1
+        if pos is not None and pos.spike_mode == 2:
+            new = spike_lock(pos.side, pos.entry, pos.init_stop, pos.stop, pos.spike_pts, pos.spike_min_r, o[i], c[i])
+            if new is not None:
+                pos.stop = new
+                pos.stop_moves += 1
 
         equity[i] = balance + (
             pos.side * (c[i] - pos.side * half_cost - pos.entry) * pos.lots * vpp if pos else 0.0
@@ -223,7 +278,9 @@ def run_backtest(
         # 5) new signal at this bar's close
         if pos is None and sig[i] != 0 and i + 1 < n and (overnight or days[i + 1] == days[i]):
             pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]),
-                       float(strail[i]), float(stbuf[i]) if not np.isnan(stbuf[i]) else 0.0)
+                       float(strail[i]), float(stbuf[i]) if not np.isnan(stbuf[i]) else 0.0,
+                       float(sspk[i]), float(sspr[i]) if not np.isnan(sspr[i]) else 1.0,
+                       int(sspm[i]) if not np.isnan(sspm[i]) else 2)
 
     if cur_day is not None:
         day_rows.append({"day": cur_day, "start": day_start_bal, "end": balance, "min_equity": day_min_eq})

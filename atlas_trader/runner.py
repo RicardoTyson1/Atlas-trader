@@ -32,6 +32,7 @@ from .brokers.base import Broker
 from .config import Config
 from .data import timeframe_to_offset
 from .notify import Notifier
+from .backtest import spike_exit, spike_lock, trail_candidate
 from .risk import RiskManager, RiskState
 from .strategies import build_strategy
 
@@ -196,17 +197,26 @@ class Runner:
         if int(row["signal"]) == 0:
             return None
         mb = row.get("max_bars", np.nan)
+        trs = row.get("trail_start_r", np.nan)
+        tbuf = row.get("trail_buf", np.nan)
+        spk = row.get("spike_pts", np.nan)
+        spr = row.get("spike_min_r", np.nan)
+        spm = row.get("spike_mode", np.nan)
         return self._try_enter(
             sym, int(row["signal"]), float(row["stop"]),
             None if pd.isna(row["target"]) else float(row["target"]),
             None if pd.isna(row["rr"]) else float(row["rr"]),
             local, acct.equity, len(positions), source=spec.name,
             max_bars=None if pd.isna(mb) else float(mb),
+            trail=None if pd.isna(trs) else (float(trs), 0.0 if pd.isna(tbuf) else float(tbuf)),
+            spike=None if pd.isna(spk) else (float(spk), 1.0 if pd.isna(spr) else float(spr),
+                                             2 if pd.isna(spm) else int(spm)),
         )
 
     # ------------------------------------------------------------ entries
     def _try_enter(self, sym, side, stop, target, rr, local, equity, n_open, source,
-                   max_bars: float | None = None) -> str:
+                   max_bars: float | None = None, trail: tuple[float, float] | None = None,
+                   spike: tuple[float, float, int] | None = None) -> str:
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open)
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
@@ -228,7 +238,13 @@ class Runner:
         self.rm.record_entry()
         self.tracked[str(pid)] = {"symbol": sym, "bot": True, "bal_before": bal_before,
                                   "entry_time": str(pd.Timestamp.now(tz="UTC")), "max_bars": max_bars,
-                                  "strategy": source}
+                                  "strategy": source, "side": side, "init_stop": stop, "stop": stop,
+                                  "target": target,
+                                  "trail_start_r": trail[0] if trail else None,
+                                  "trail_buf": trail[1] if trail else None,
+                                  "spike_pts": spike[0] if spike else None,
+                                  "spike_min_r": spike[1] if spike else None,
+                                  "spike_mode": spike[2] if spike else None}
         self.save()                                    # never lose track of a live order
         risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
         self.notify.send(
@@ -394,7 +410,52 @@ class Runner:
             self._close_verified([pid])
             self.notify.send(f"Strategy exit {sym} ({spec.name}).")
             return "exit:signal"
-        return None
+        return self._trail(pid, t, pos, sym, bars)
+
+    def _trail(self, pid: str, t: dict, pos, sym: str, bars: pd.DataFrame) -> str | None:
+        """Candle trailing stop on the live trade (same rule as the backtester).
+
+        Evaluated once per completed bar. Only ever tightens the broker-side stop; if the
+        broker refuses, the previous stop stays in place and we alert once.
+        """
+        if len(bars) < 3:
+            return None
+        last = str(bars.index[-1])
+        if t.get("trail_bar") == last:
+            return None
+        t["trail_bar"] = last
+        o_, c_ = float(bars["open"].iloc[-1]), float(bars["close"].iloc[-1])
+        if t.get("spike_pts") and int(t.get("spike_mode") or 2) == 1 and spike_exit(
+                pos.side, pos.entry, float(t["init_stop"]), float(t["spike_pts"]),
+                float(t["spike_min_r"] or 1.0), o_, c_):
+            self._close_verified([pid])
+            self.notify.send(f"Took profit on {sym}: big candle in our favor.")
+            return "exit:big candle"
+        candidates = []
+        if t.get("spike_pts") and int(t.get("spike_mode") or 2) == 2:
+            candidates.append(spike_lock(pos.side, pos.entry, float(t["init_stop"]), float(t["stop"]),
+                                         float(t["spike_pts"]), float(t["spike_min_r"] or 1.0), o_, c_))
+        if t.get("trail_start_r") is None and not candidates:
+            return None
+        if t.get("trail_start_r") is not None:
+            candidates.append(trail_candidate(pos.side, pos.entry, float(t["init_stop"]), float(t["stop"]),
+                                              float(t["trail_start_r"]), float(t["trail_buf"] or 0.0),
+                                              *(bars[k].to_numpy(float)[-3:] for k in ("open", "high", "low", "close"))))
+        candidates = [x for x in candidates if x is not None and pos.side * (x - float(t["stop"])) > 0]
+        if not candidates:
+            return None
+        new = max(candidates) if pos.side == 1 else min(candidates)   # the tightest, never backwards
+        if not self.broker.modify_stop(pid, new, t.get("target")):
+            self._alert_once(f"trailfail:{pid}", f"Could not move the stop on {sym}; the previous stop "
+                             f"({float(t['stop']):.2f}) is still in place.", logging.ERROR)
+            return None
+        t["stop"] = new
+        self.save()
+        inst = self.cfg.instrument(sym)
+        locked = pos.side * (new - pos.entry) * pos.qty * inst.value_per_point
+        self.notify.send(f"Trailed {sym} stop to {new:.2f} ({'locks' if locked >= 0 else 'risk now'} "
+                         f"${abs(locked):,.0f}).")
+        return "trail"
 
     # ------------------------------------------------------------ reports
     def _report(self, local) -> dict:
