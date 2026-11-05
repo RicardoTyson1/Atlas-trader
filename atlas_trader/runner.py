@@ -53,6 +53,7 @@ class Runner:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.kill_file = Path(cfg.paths.get("kill_switch_file", self.state_dir / "KILL"))
         self.lock = threading.RLock()
+        self.clock = lambda: pd.Timestamp.now(tz="UTC")   # wall clock; tests swap in the sim clock
         self.close_poll_seconds = 1.5   # how often a close is re-checked (positions API: 1 call/s)
         self.close_timeout_seconds = 12.0
         self.strats = [
@@ -206,7 +207,7 @@ class Runner:
 
     # ------------------------------------------------------------ entries
     def _try_enter(self, sym, side, stop, target, rr, local, equity, n_open, source,
-                   max_bars: float | None = None) -> str:
+                   max_bars: float | None = None, worst_price: float | None = None) -> str:
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open)
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
@@ -215,6 +216,8 @@ class Runner:
         price = ask if side > 0 else bid               # the price we will actually pay
         if side * (price - stop) <= 0:
             return "skipped:price already through the stop"
+        if worst_price is not None and side * (price - worst_price) > 0:
+            return f"skipped:price {price:.2f} moved too far past the entry (limit {worst_price:.2f})"
         if target is None:
             target = price + side * (rr or 2.0) * abs(price - stop)
         if side * (target - price) <= 0:
@@ -238,10 +241,11 @@ class Runner:
         return "entered"
 
     def submit_external(self, symbol: str, side: int, stop: float, target: float | None = None,
-                        rr: float | None = None, source: str = "tradingview") -> str:
+                        rr: float | None = None, source: str = "tradingview",
+                        worst_price: float | None = None) -> str:
         """Entry from outside (e.g. TradingView alert). Same checks as the strategies."""
         with self.lock:
-            local = pd.Timestamp.now(tz="UTC").tz_convert(self.cfg.session.tz)
+            local = self.clock().tz_convert(self.cfg.session.tz)
             positions = self.broker.positions()
             acct = self.broker.account()
             self.rm.new_day(local.date(), acct.balance)
@@ -250,7 +254,8 @@ class Runner:
                 self.notify.send(ev, logging.WARNING)
             if any(p.symbol == symbol for p in positions):
                 return "skipped:position already open"
-            res = self._try_enter(symbol, side, stop, target, rr, local, acct.equity, len(positions), source)
+            res = self._try_enter(symbol, side, stop, target, rr, local, acct.equity, len(positions), source,
+                                  worst_price=worst_price)
             self.save()
             return res
 

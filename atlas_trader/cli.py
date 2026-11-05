@@ -194,9 +194,9 @@ def cmd_run(args, cfg: Config) -> None:
         notifier.send(f"FAILED TO START: {e!r}. Will retry in 5 minutes.", logging.CRITICAL)
         notifier.heartbeat(False, repr(e))
         raise
-    if args.webhook:
+    if args.webhook or cfg.webhook.get("enabled", False):
         threading.Thread(
-            target=serve, args=(runner, cfg.webhook.get("host", "0.0.0.0"), int(cfg.webhook.get("port", 8787))),
+            target=serve, args=(runner, cfg.webhook.get("host", "0.0.0.0"), int(cfg.webhook.get("port", 80))),
             daemon=True,
         ).start()
     runner.run_forever()  # returns only after the kill switch
@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> None:
 
     r = sub.add_parser("run", help="run the bot against TradeLocker (demo by default)")
     r.add_argument("--mode", choices=["demo", "live"], default="demo")
-    r.add_argument("--webhook", action="store_true", help="also accept TradingView alerts")
+    r.add_argument("--webhook", action="store_true", help="also accept TradingView alerts (or set webhook.enabled: true in the config)")
     r.add_argument("--i-accept-real-money-risk", action="store_true")
     r.set_defaults(fn=cmd_run)
 
