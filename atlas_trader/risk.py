@@ -207,18 +207,24 @@ class RiskManager:
         dist = abs(entry - stop) + inst.spread_points + inst.slippage_points
         return dist * inst.value_per_point + 2 * inst.commission_per_lot
 
+    def in_core_hours(self, when: datetime) -> bool:
+        """True inside `core_hours` (local time), or always when no core hours are set."""
+        if not self.risk.core_hours:
+            return True
+        m = when.hour * 60 + when.minute
+        for rng in str(self.risk.core_hours).split(","):
+            a, b = rng.strip().split("-")
+            if int(a[:2]) * 60 + int(a[3:]) <= m < int(b[:2]) * 60 + int(b[3:]):
+                return True
+        return False
+
     def risk_pct_at(self, when: datetime | None = None) -> float:
         """Risk per trade (%) for an entry at `when` (local time): full inside core_hours,
         `off_hours_risk_pct` outside them."""
         r = self.risk
         if when is None or not r.core_hours or r.off_hours_risk_pct is None:
             return r.risk_per_trade_pct
-        m = when.hour * 60 + when.minute
-        for rng in str(r.core_hours).split(","):
-            a, b = rng.strip().split("-")
-            if int(a[:2]) * 60 + int(a[3:]) <= m < int(b[:2]) * 60 + int(b[3:]):
-                return r.risk_per_trade_pct
-        return float(r.off_hours_risk_pct)
+        return r.risk_per_trade_pct if self.in_core_hours(when) else float(r.off_hours_risk_pct)
 
     def size(self, entry: float, stop: float, inst: Instrument, equity: float,
              when: datetime | None = None) -> float:

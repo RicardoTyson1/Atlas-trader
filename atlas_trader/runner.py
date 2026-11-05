@@ -178,7 +178,7 @@ class Runner:
         tf = pd.Timedelta(timeframe_to_offset(spec.timeframe))
         if sym in held:
             return self._manage_exit(spec, strat, sym, now)
-        key = f"{spec.name}:{sym}"
+        key = f"{spec.id}:{sym}"
         expected_last = now.floor(tf) - tf          # newest bar that should be complete
         if self.extra["last_signal_bar"].get(key) == str(expected_last):
             return None                              # nothing new since last evaluation
@@ -214,7 +214,7 @@ class Runner:
             sym, int(row["signal"]), float(row["stop"]),
             None if pd.isna(row["target"]) else float(row["target"]),
             None if pd.isna(row["rr"]) else float(row["rr"]),
-            local, acct.equity, len(positions), source=spec.name,
+            local, acct.equity, len(positions), source=spec.id,
             max_bars=None if pd.isna(mb) else float(mb),
             trail=None if pd.isna(trs) else (float(trs), 0.0 if pd.isna(tbuf) else float(tbuf)),
             spike=None if pd.isna(spk) else (float(spk), 1.0 if pd.isna(spr) else float(spr),
@@ -442,7 +442,7 @@ class Runner:
     # ------------------------------------------------------------ exits
     def _manage_exit(self, spec, strat, sym: str, now: pd.Timestamp) -> str | None:
         mine = [(pid, t) for pid, t in self.tracked.items()
-                if t["symbol"] == sym and t["bot"] and t.get("strategy") == spec.name]
+                if t["symbol"] == sym and t["bot"] and t.get("strategy") == spec.id]
         if not mine:
             return None  # not this strategy's trade (e.g. a manual one): leave it to the trader
         pid, t = mine[0]
@@ -460,9 +460,16 @@ class Runner:
         ex = int(strat.generate(bars)["exit"].iloc[-1])
         if ex != 0 and ex in (2, pos.side):
             self._close_verified([pid])
-            self.notify.send(f"Strategy exit {sym} ({spec.name}).")
+            self.notify.send(f"Strategy exit {sym} ({spec.id}).")
             return "exit:signal"
-        return self._trail(pid, t, pos, sym, bars)
+        # outside core hours every trade trails on 1-minute candles (Ricardo, 2026-11-05)
+        trail_bars = bars
+        local = now.tz_convert(self.cfg.session.tz)
+        if spec.timeframe != "1m" and self.cfg.risk.core_hours and not self.rm.in_core_hours(local.to_pydatetime()):
+            b1 = self.broker.bars(sym, "1m", 300)
+            if not b1.empty:
+                trail_bars = b1
+        return self._trail(pid, t, pos, sym, trail_bars)
 
     def _trail(self, pid: str, t: dict, pos, sym: str, bars: pd.DataFrame) -> str | None:
         """Candle trailing stop on the live trade (same rule as the backtester).

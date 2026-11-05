@@ -101,6 +101,11 @@ class StrategySpec:
     timeframe: str = "5m"
     history_bars: int = 600   # bars fetched each cycle in live trading
     params: dict[str, Any] = field(default_factory=dict)
+    label: str | None = None  # unique name when the same strategy runs twice (e.g. 5m and 1m)
+
+    @property
+    def id(self) -> str:
+        return self.label or self.name
 
 
 @dataclass
