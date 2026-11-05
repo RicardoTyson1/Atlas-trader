@@ -535,7 +535,9 @@ class Runner:
             self.notify.send(
                 f"Good morning. {status}. Balance ${acct.balance:,.2f}. "
                 f"Day stop at ${self.rm.daily_floor():,.0f}, account stop at ${self.rm.dd_floor():,.0f}. "
-                f"Max {self.cfg.risk.max_trades_per_day} trades, {self.cfg.risk.risk_per_trade_pct}% risk each"
+                + (f"Max {self.cfg.risk.max_trades_per_day} trades, " if self.cfg.risk.max_trades_per_day < 1000
+                   else "No trade cap, ")
+                + f"{self.cfg.risk.risk_per_trade_pct}% risk each"
                 + (f" ({self.cfg.risk.off_hours_risk_pct}% outside {self.cfg.risk.core_hours} NY). "
                    if self.cfg.risk.core_hours and self.cfg.risk.off_hours_risk_pct is not None else ". ")
                 + (f"Entries around the clock; flat {self.cfg.session.flat_by:%H:%M}-{self.cfg.session.reopen:%H:%M} NY daily break."
