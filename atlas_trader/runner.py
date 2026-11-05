@@ -32,7 +32,7 @@ from .brokers.base import Broker
 from .config import Config
 from .data import timeframe_to_offset
 from .notify import Notifier
-from .backtest import spike_exit, spike_lock, trail_candidate
+from .backtest import runaway_lock, spike_exit, spike_lock, trail_candidate
 from .risk import RiskManager, RiskState
 from .strategies import build_strategy
 
@@ -450,6 +450,14 @@ class Runner:
                                          float(t["spike_pts"]), float(t["spike_min_r"] or 1.0), o_, c_))
         if t.get("trail_start_r") is None and not candidates:
             return None
+        run_start = (self.cfg.exits or {}).get("runaway_start_r")
+        if run_start is not None and t.get("trail_start_r") is not None:
+            since = bars[bars.index >= pd.Timestamp(t["entry_time"]).floor("min")]
+            if len(since):
+                best = float(since["high"].max() if pos.side == 1 else since["low"].min())
+                candidates.append(runaway_lock(pos.side, pos.entry, float(t["init_stop"]), float(t["stop"]),
+                                               float(run_start), float(self.cfg.exits.get("runaway_keep", 0.6)),
+                                               best, c_))
         if t.get("trail_start_r") is not None:
             candidates.append(trail_candidate(pos.side, pos.entry, float(t["init_stop"]), float(t["stop"]),
                                               float(t["trail_start_r"]), float(t["trail_buf"] or 0.0),

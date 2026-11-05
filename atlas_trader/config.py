@@ -147,6 +147,7 @@ class Config:
     webhook: dict[str, Any]
     paths: dict[str, str]
     monitoring: dict[str, Any] = field(default_factory=dict)
+    exits: dict[str, Any] = field(default_factory=dict)   # runaway_start_r / runaway_keep
 
     def instrument(self, symbol: str) -> Instrument:
         if symbol not in self.instruments:
@@ -197,6 +198,7 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         strategies=strategies,
         tradelocker=raw.get("tradelocker") or {},
         webhook=raw.get("webhook") or {},
+        exits=raw.get("exits") or {},
         paths=raw.get("paths") or {},
         monitoring=raw.get("monitoring") or {},
     )

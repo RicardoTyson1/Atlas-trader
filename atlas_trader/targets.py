@@ -90,9 +90,9 @@ class TargetFinder:
         h1 = df.resample("1h", label="left", closed="left").agg(
             {"open": "first", "high": "max", "low": "min", "close": "last"}).dropna()
         self.h1 = h1
-        self.h1_end = (h1.index + pd.Timedelta(hours=1)).asi8
+        self.h1_end = (h1.index + pd.Timedelta(hours=1)).as_unit("ns").asi8
         self.h1_a = _atr(h1, 14).to_numpy() if len(h1) else np.array([])
-        self.bar_end = (df.index + _bar_delta(df)).asi8
+        self.bar_end = (df.index + _bar_delta(df)).as_unit("ns").asi8
 
     # ------------------------------------------------------------------ candidates
     def candidates(self, i: int, side: int, entry: float) -> list[tuple[float, str]]:

@@ -48,6 +48,7 @@ class Trade:
     spike_min_r: float = 1.0
     spike_mode: int = 2                   # 1 = take the profit at the close, 2 = lock: stop to mid-candle
     stop_moves: int = 0
+    best: float = float("nan")            # best price reached since entry (for the runaway lock)
 
 
 @dataclass
@@ -86,6 +87,26 @@ def trail_candidate(side: int, entry: float, init_stop: float, cur_stop: float, 
     return None
 
 
+def runaway_lock(side: int, entry: float, init_stop: float, cur_stop: float, start_r: float,
+                 keep: float, best: float, last_close: float) -> float | None:
+    """When price runs away in our favor, don't give most of it back.
+
+    Once the best open profit since entry reaches `start_r` x initial risk, the stop is kept at
+    `keep` x that best profit (e.g. keep 0.6 = never give back more than 40% of the best run).
+    Shared by the backtester and the live runner. Returns the new stop or None (never loosens).
+    """
+    if start_r is None or keep is None or np.isnan(start_r) or np.isnan(best):
+        return None
+    risk0 = abs(entry - init_stop)
+    mfe = side * (best - entry)
+    if risk0 <= 0 or mfe < start_r * risk0:
+        return None
+    new = entry + side * keep * mfe
+    if side * (new - cur_stop) > 0 and side * (last_close - new) > 0:
+        return float(new)
+    return None
+
+
 def spike_exit(side: int, entry: float, init_stop: float, spike_pts: float, min_r: float,
                o: float, c: float) -> bool:
     """Take the big gain: the last completed candle moved hard in the trade's favor
@@ -118,6 +139,9 @@ def run_backtest(
     sigs = strategy.generate(df)
     d = add_session_columns(df, cfg.session.timezone)
     rm = RiskManager(cfg.prop, cfg.risk, cfg.session, cfg.news, initial)
+    exits = getattr(cfg, "exits", None) or {}
+    run_start = exits.get("runaway_start_r")
+    run_keep = float(exits.get("runaway_keep", 0.6))
 
     idx = df.index
     n = len(df)
@@ -262,6 +286,13 @@ def run_backtest(
         if pos is not None and not np.isnan(pos.trail_start_r) and i >= 2:
             new = trail_candidate(pos.side, pos.entry, pos.init_stop, pos.stop, pos.trail_start_r,
                                   pos.trail_buf, o[i - 2:i + 1], h[i - 2:i + 1], l[i - 2:i + 1], c[i - 2:i + 1])
+            if new is not None:
+                pos.stop = new
+                pos.stop_moves += 1
+        if pos is not None and not np.isnan(pos.trail_start_r) and run_start is not None:
+            ext = h[i] if pos.side == 1 else l[i]
+            pos.best = ext if np.isnan(pos.best) else (max(pos.best, ext) if pos.side == 1 else min(pos.best, ext))
+            new = runaway_lock(pos.side, pos.entry, pos.init_stop, pos.stop, run_start, run_keep, pos.best, c[i])
             if new is not None:
                 pos.stop = new
                 pos.stop_moves += 1
