@@ -138,6 +138,7 @@ class Runner:
             self.notify.send(ev, logging.WARNING)
         self._news_refresh(now)
         self._daily_reports(local, acct)
+        self._weekly_review(local)
 
         if self.cfg.risk.guardian:
             g = self._guard(positions, acct.balance, local)
@@ -245,6 +246,7 @@ class Runner:
         if qty <= 0:
             return "skipped:size below minimum lot (stop too wide for risk budget)"
         bal_before = self.broker.account().balance     # before the opening fee is charged
+        risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
         pid = self.broker.market_bracket(sym, side, qty, stop, target)
         self.rm.record_entry()
         self.tracked[str(pid)] = {"symbol": sym, "bot": True, "bal_before": bal_before,
@@ -255,9 +257,9 @@ class Runner:
                                   "trail_buf": trail[1] if trail else None,
                                   "spike_pts": spike[0] if spike else None,
                                   "spike_min_r": spike[1] if spike else None,
-                                  "spike_mode": spike[2] if spike else None}
+                                  "spike_mode": spike[2] if spike else None,
+                                  "risk_usd": risk_usd}
         self.save()                                    # never lose track of a live order
-        risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
         self.notify.send(
             f"{'BUY' if side > 0 else 'SELL'} {qty} {sym} @~{price:.2f} SL {stop:.2f} TP {target:.2f}"
             f"{f' ({tp_note})' if tp_note else ''} (risk ~${risk_usd:,.0f}, {source})"
@@ -294,6 +296,7 @@ class Runner:
         baseline = min(self.tracked[pid]["bal_before"] for pid in gone)
         pnl = balance - baseline
         syms = sorted({self.tracked[pid]["symbol"] for pid in gone})
+        self._journal(gone, pnl, local)
         for pid in gone:
             self.tracked.pop(pid)
         self.rm.record_close(pnl, when)
@@ -301,6 +304,42 @@ class Runner:
         rep["closed"] = rep.get("closed", 0) + len(gone)
         self.notify.send(f"Closed {', '.join(syms)}: P/L ${pnl:,.2f}"
                          + (f" | cooldown until {self.rm.s.cooldown_until[11:16]}" if pnl < 0 and self.rm.s.cooldown_until else ""))
+
+    def _journal(self, gone: list, pnl: float, local) -> None:
+        """Append closed trades to state/journal.csv (learning-mode record)."""
+        from .journal import append
+        try:
+            share = pnl / len(gone)
+            for pid in gone:
+                t = self.tracked[pid]
+                risk = t.get("risk_usd")
+                append(self.state_dir / "journal.csv", {
+                    "close_time": pd.Timestamp(local).isoformat(), "strategy": t.get("strategy") or "manual",
+                    "symbol": t.get("symbol"), "side": t.get("side", ""), "entry_time": pd.Timestamp(t["entry_time"]).isoformat(),
+                    "pnl": round(share, 2), "risk_usd": round(risk, 2) if risk else "",
+                    "r": round(share / risk, 3) if risk else ""})
+        except Exception:  # bookkeeping must never stop trading
+            log.exception("journal write failed")
+
+    def _weekly_review(self, local) -> None:
+        """Friday after the 17:00 NY close: keep/drop report on Telegram + reports/weekly_*.md."""
+        if local.weekday() != 4 or local.hour * 60 + local.minute < 17 * 60 + 5:
+            return
+        day = local.date().isoformat()
+        if self.extra["alerts"].get(f"weekly:{day}"):
+            return
+        self.extra["alerts"][f"weekly:{day}"] = True     # persisted: no repeat after a restart
+        from .journal import weekly_report
+        try:
+            text = weekly_report(self.state_dir / "journal.csv", local.to_pydatetime() if hasattr(local, "to_pydatetime") else local)
+            out = Path(self.cfg.paths.get("report_dir", "reports"))
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"weekly_{day}.md").write_text(text + "\n")
+            self.notify.send(text)
+        except Exception as e:
+            log.exception("weekly review failed")
+            self.notify.send(f"Weekly review failed: {e!r}", logging.ERROR)
+        self.save()
 
     # ------------------------------------------------------------ guardian
     def _guard(self, positions, balance: float, local) -> list[str]:
