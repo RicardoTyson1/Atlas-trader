@@ -88,18 +88,40 @@ instruments:
     commission_per_lot: 3.5       # VERIFY
 
 # Which strategy runs on which instrument. Params override strategy defaults.
-# liquidity_fvg = your model (daily fib discount bias -> liquidity sweep -> FVG retrace).
-# Status: UNPROVEN. Best research candidate, now being forward-tested on DEMO only.
+# reversal_trail = Ricardo's video model: fast move (+ extreme RSI) -> change of character
+# -> entry; stop beyond the move's extreme; take profit at 50% of the move, or early on an
+# aggressive candle in our favor; candle-by-candle trailing stop. Both directions
+# (oversold -> long, overbought -> short). NY morning only for now.
+# Status: UNPROVEN. Demo forward test only (replaces liquidity_fvg, which failed testing).
+# Weak/strong ranking: research/shootout.py; drop whatever the shoot-out and demo show is weak.
 strategies:
-  - name: liquidity_fvg
+  - name: reversal_trail
     instruments: [XAUUSD.R]
     timeframe: 5m
-    history_bars: 7000            # ~25 trading days of 5m bars (needs 20-day range)
+    history_bars: 600
     params:
-      bias: discount
-      liquidity: both
-      killzones: both
-      target: liquidity
+      move_atr: 3.0
+      rsi_level: 25
+      target: half_move
+      spike_atr: 2.5
+      spike_min_r: 1.0
+      trail_start_r: 1.0
+      trail_buf_atr: 0.3
+      hours: "08:00-11:00"          # bot session allows entries 02:00-11:00 NY only; evening needs a session change
+  # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
+  # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
+  # Status: UNPROVEN. Demo forward test alongside reversal_trail (one position at a time).
+  - name: momentum_rsi
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+    params:
+      disp_atr: 1.2
+      trend_filter: true
+      trail_start_r: 1.0
+      trail_buf_atr: 0.3
+      spike_atr: 2.0
+      hours: "08:00-11:00"
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
