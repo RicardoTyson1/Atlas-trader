@@ -137,3 +137,40 @@ def test_time_exit(cfg):
     df = bars([(100, 100, 100, 100)] * 6)
     t = run_backtest(df, Hold2(cfg.session), inst, cfg).trades.iloc[0]
     assert t.reason == "time exit" and t.bars == 2
+
+
+class LimitLong(Strategy):
+    name = "limit_long"
+    defaults = {"entry": 95.0, "stop": 90.0, "target": 110.0, "expire": 3}
+
+    def generate(self, df):
+        out = self._empty(df.index)
+        out["entry"] = np.nan
+        out["expire_bars"] = np.nan
+        out.iloc[0, out.columns.get_loc("signal")] = 1
+        out.iloc[0, out.columns.get_loc("stop")] = self.p["stop"]
+        out.iloc[0, out.columns.get_loc("target")] = self.p["target"]
+        out.iloc[0, out.columns.get_loc("entry")] = self.p["entry"]
+        out.iloc[0, out.columns.get_loc("expire_bars")] = self.p["expire"]
+        return out
+
+
+def test_limit_entry_fills_at_limit_and_hits_target(cfg):
+    inst = zero_cost(cfg)
+    df = bars([(100, 100, 100, 100), (100, 101, 99, 100), (99, 99, 94, 96), (96, 111, 96, 110), (110,) * 4])
+    t = run_backtest(df, LimitLong(cfg.session), inst, cfg).trades.iloc[0]
+    assert t.entry == 95.0 and t.exit == 110.0 and t.reason == "target"
+
+
+def test_limit_entry_expires_unfilled(cfg):
+    inst = zero_cost(cfg)
+    df = bars([(100, 100, 100, 100)] * 2 + [(100, 101, 96, 100)] * 4)
+    assert run_backtest(df, LimitLong(cfg.session), inst, cfg).trades.empty
+
+
+def test_limit_fill_bar_checks_stop_but_not_target(cfg):
+    inst = zero_cost(cfg)
+    # fill bar touches both 95 (entry) and 89 (stop) and 111 (target): conservative = stop
+    df = bars([(100, 100, 100, 100), (100, 111, 89, 100), (100,) * 4])
+    t = run_backtest(df, LimitLong(cfg.session), inst, cfg).trades.iloc[0]
+    assert t.reason == "stop" and t.exit == 90.0

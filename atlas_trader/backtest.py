@@ -73,6 +73,9 @@ def run_backtest(
     srr = sigs["rr"].to_numpy(float)
     sexit = sigs["exit"].to_numpy(int) if "exit" in sigs else np.zeros(len(sigs), dtype=int)
     smaxb = sigs["max_bars"].to_numpy(float) if "max_bars" in sigs else np.full(len(sigs), np.nan)
+    # optional LIMIT entries: rest an order at `entry` for `expire_bars` bars
+    sentry = sigs["entry"].to_numpy(float) if "entry" in sigs else np.full(len(sigs), np.nan)
+    sexpire = sigs["expire_bars"].to_numpy(float) if "expire_bars" in sigs else np.full(len(sigs), np.nan)
     overnight = cfg.session.overnight
     days = d["day"].to_numpy()
     tz = cfg.session.tz
@@ -86,7 +89,7 @@ def run_backtest(
 
     balance = initial
     pos: Trade | None = None
-    pending: tuple[int, float, float, float, float] | None = None
+    pending: tuple | None = None
     trades: list[Trade] = []
     equity = np.empty(n)
     events: list[str] = []
@@ -123,23 +126,44 @@ def run_backtest(
             day_start_bal = balance
             day_min_eq = balance
 
-        # 1) entry at this bar's open
+        # 1) entry: market at this bar's open, or a resting limit order touched in this bar
+        limit_fill_bar = False
         if pending is not None and pos is None:
-            side, stop, tgt, rr, maxb = pending
-            ok, _ = rm.check_entry(ts_open_local, open_positions=0)
-            fill = o[i] + side * half_cost
-            if ok and side * (fill - stop) > 0:
-                target = tgt if not np.isnan(tgt) else fill + side * rr * abs(fill - stop)
-                if side * (target - fill) > 0:
-                    lots = rm.size(fill, stop, inst, balance)
-                    if lots > 0:
-                        balance -= inst.commission_per_lot * lots
-                        pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb)
-                        rm.record_entry()
-        pending = None
+            side, stop, tgt, rr, maxb, lim, left = pending
+            fill = None
+            if np.isnan(lim):
+                fill = o[i] + side * half_cost
+                pending = None
+            else:
+                touched = l[i] <= lim if side == 1 else h[i] >= lim
+                if touched:
+                    px = min(o[i], lim) if side == 1 else max(o[i], lim)  # gap through = better price
+                    fill = px + side * inst.spread_points / 2
+                    limit_fill_bar = True
+                    pending = None
+                else:
+                    left -= 1
+                    pending = (side, stop, tgt, rr, maxb, lim, left) if left > 0 else None
+            if fill is not None:
+                ok, _ = rm.check_entry(ts_open_local, open_positions=0)
+                if ok and side * (fill - stop) > 0:
+                    target = tgt if not np.isnan(tgt) else fill + side * rr * abs(fill - stop)
+                    if side * (target - fill) > 0:
+                        lots = rm.size(fill, stop, inst, balance)
+                        if lots > 0:
+                            balance -= inst.commission_per_lot * lots
+                            pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb)
+                            rm.record_entry()
+                if pos is None:
+                    limit_fill_bar = False
 
-        # 2) exits inside this bar (stop first if ambiguous)
-        if pos is not None:
+        # 2) exits inside this bar (stop first if ambiguous).
+        #    On the bar a LIMIT order fills we only know price came to our level, not
+        #    what happened after, so only the stop is checked (conservative).
+        if pos is not None and limit_fill_bar:
+            if (pos.side == 1 and l[i] <= pos.stop) or (pos.side == -1 and h[i] >= pos.stop):
+                close_pos(i, pos.stop, "stop")
+        elif pos is not None:
             s, st, tg = pos.side, pos.stop, pos.target
             if s == 1:
                 if o[i] <= st:
@@ -196,7 +220,9 @@ def run_backtest(
 
         # 5) new signal at this bar's close
         if pos is None and sig[i] != 0 and i + 1 < n and (overnight or days[i + 1] == days[i]):
-            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]))
+            exp = sexpire[i]
+            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]),
+                       float(sentry[i]), int(exp) if not np.isnan(exp) else 1)
 
     if cur_day is not None:
         day_rows.append({"day": cur_day, "start": day_start_bal, "end": balance, "min_equity": day_min_eq})
