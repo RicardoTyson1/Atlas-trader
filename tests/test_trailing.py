@@ -41,3 +41,40 @@ def test_trailing_stop_locks_profit(cfg):
     assert abs(t.exit - 101.5) < 1e-9
     assert abs(t.r - (101.5 - 100) / 2.0) < 1e-9   # R vs the initial stop
     assert t.pnl > 0
+
+
+def test_runner_trails_live_stop_only_in_favor(cfg):
+    """The live runner moves the broker-side stop with the same rule, never against the trade."""
+    import pandas as pd
+    from atlas_trader.brokers.base import Position
+    from atlas_trader.notify import MemoryNotifier
+    from atlas_trader.runner import Runner
+
+    class FakeBroker:
+        def __init__(self):
+            self.moves = []
+
+        def modify_stop(self, pid, stop, target=None):
+            self.moves.append((pid, stop, target))
+            return True
+
+    b = bars([(100, 100.5, 99.5, 100), (102.4, 102.5, 101.6, 101.8), (101.8, 103.5, 101.7, 103.4)])
+    fb = FakeBroker()
+    r = Runner(cfg, fb, MemoryNotifier())
+    t = {"symbol": "NAS100", "init_stop": 98.0, "stop": 98.0, "target": 200.0,
+         "trail_start_r": 1.0, "trail_buf": 0.1}
+    pos = Position("p1", "NAS100", 1, 1.0, 100.0)
+    assert r._trail("p1", t, pos, "NAS100", b) == "trail"
+    assert fb.moves == [("p1", 101.5, 200.0)] and t["stop"] == 101.5
+    assert r._trail("p1", t, pos, "NAS100", b) is None          # same bar: evaluated once
+    t["trail_bar"] = None
+    t["stop"] = 102.0                                             # already tighter: never loosened
+    assert r._trail("p1", t, pos, "NAS100", b) is None
+
+
+def test_big_candle_takes_profit():
+    from atlas_trader.backtest import spike_exit
+    assert spike_exit(1, 100, 98, 3.0, 1.0, o=101.0, c=104.5)        # +4.5 (>=1R), body 3.5 >= 3
+    assert not spike_exit(1, 100, 98, 3.0, 1.0, o=101.0, c=103.5)    # body 2.5 too small
+    assert not spike_exit(1, 100, 98, 3.0, 1.0, o=98.0, c=101.5)     # profit 1.5 < 1R
+    assert spike_exit(-1, 100, 102, 3.0, 1.0, o=99.0, c=95.0)        # shorts mirror it
