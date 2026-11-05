@@ -6,6 +6,9 @@
            (long) / below (short) the `ema` EMA. Next bar's open, inside `hours` (NY time).
   STOP   : beyond the aggressive candle's wick + `stop_buffer_atr` x ATR (skipped if wider than
            `max_stop_atr` x ATR).
+  TARGET : `tp: levels` = take profit at the nearest FVG 50% / resting liquidity / major S/R
+           level paying >= `tp_min_r` x risk (atlas_trader/targets.py); none in reach = no
+           trade. `tp: none` = no fixed target (`reward_risk` 0) and ride the trail.
   STAY IN: no fixed target by default (`reward_risk` 0). Candle trailing stop from
            `trail_start_r` x risk; on another aggressive candle in our favor (body >=
            `spike_atr` x ATR) the stop is pulled to the middle of that candle. The stop never
@@ -18,6 +21,7 @@ import pandas as pd
 
 from ..indicators import atr, ema, rsi
 from .base import Strategy
+from ..targets import TargetFinder, tp_params
 
 
 class MomentumRSI(Strategy):
@@ -38,6 +42,11 @@ class MomentumRSI(Strategy):
         "spike_min_r": 1.0,
         "spike_mode": 2,
         "reward_risk": 0.0,
+        "tp": "none",              # none | levels
+        "tp_min_r": 1.0,           # take-profit levels: nearest FVG 50% / liquidity / major S/R
+        "tp_lookback_bars": 0,     # paying >= tp_min_r x risk (see atlas_trader/targets.py)
+        "tp_sr_days": 10,
+        "tp_front_atr": 0.1,
         "hours": "08:00-11:00",
     }
 
@@ -73,10 +82,23 @@ class MomentumRSI(Strategy):
         risk = np.abs(c - stop)
         side = np.where((side != 0) & (risk > 0) & (risk <= p["max_stop_atr"] * a), side, 0)
 
+        tgt = np.full(len(df), np.nan)
+        kind = np.full(len(df), None, object)
+        if p["tp"] == "levels" and (side != 0).any():
+            finder = TargetFinder(df, self.session.timezone, tp_params(p))
+            for i in np.flatnonzero(side):
+                hit = finder.find(int(i), int(side[i]), float(c[i]), float(stop[i]))
+                if hit is None:
+                    side[i] = 0                     # nothing worth >= tp_min_r in the path: skip
+                else:
+                    tgt[i], kind[i] = hit
         out["signal"] = side
         out["stop"] = np.where(side != 0, stop, np.nan)
-        out["rr"] = np.where(side != 0, float(p["reward_risk"]) if p["reward_risk"] > 0 else 1000.0, np.nan)
+        out["target"] = np.where(side != 0, tgt, np.nan)
+        out["rr"] = np.where((side != 0) & np.isnan(tgt),
+                             float(p["reward_risk"]) if p["reward_risk"] > 0 else 1000.0, np.nan)
         out = self._finalize(out, df["close"])
+        out["tp_kind"] = np.where(out["signal"] != 0, kind, None)
         on = out["signal"] != 0
         out["trail_start_r"] = np.where(on, float(p["trail_start_r"]), np.nan)
         out["trail_buf"] = np.where(on, p["trail_buf_atr"] * a, np.nan)

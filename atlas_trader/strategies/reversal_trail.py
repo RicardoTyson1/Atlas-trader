@@ -16,7 +16,9 @@ put the stop beyond the fast move's extreme, and trail it candle by candle.
               RSI(`rsi_period`) <= rsi_level for a long (oversold sell-off),
               >= 100 - rsi_level for a short (overbought rally).
   TARGET    : `target: half_move` = take profit at 50% of the fast move (retrace toward where it
-              started); `target: rr` = fixed `reward_risk` x risk (0 = no target, trail only).
+              started); `target: levels` = nearest FVG 50% / resting liquidity / major S/R level
+              paying >= `tp_min_r` x risk (atlas_trader/targets.py), none in reach = no trade;
+              `target: rr` = fixed `reward_risk` x risk (0 = no target, trail only).
   BIG CANDLE: if `spike_atr` > 0 and a candle in the trade's favor has a body >= spike_atr x ATR
               while the trade is up >= `spike_min_r` x risk: `spike_mode` 2 (default) = stay in
               the move and pull the stop to the middle of that candle; 1 = take the profit.
@@ -31,6 +33,7 @@ import pandas as pd
 from ..indicators import atr, rsi
 from .base import Strategy
 from .break_retest import _swings
+from ..targets import TargetFinder, tp_params
 
 
 class ReversalTrail(Strategy):
@@ -48,7 +51,11 @@ class ReversalTrail(Strategy):
         "trail_start_r": 1.0,
         "trail_buf_atr": 0.3,
         "reward_risk": 0.0,
-        "target": "rr",            # rr | half_move
+        "target": "rr",            # rr | half_move | levels
+        "tp_min_r": 1.0,           # take-profit levels: nearest FVG 50% / liquidity / major S/R
+        "tp_lookback_bars": 0,     # paying >= tp_min_r x risk (see atlas_trader/targets.py)
+        "tp_sr_days": 10,
+        "tp_front_atr": 0.1,
         "spike_atr": 0.0,          # 0 = off; e.g. 2.5 = take profit on an aggressive candle
         "spike_min_r": 1.0,
         "spike_mode": 2,
@@ -88,6 +95,8 @@ class ReversalTrail(Strategy):
         trs = np.full(n, np.nan)
         tbuf = np.full(n, np.nan)
         spk = np.full(n, np.nan)
+        kind = np.full(n, None, object)
+        finder = None
         setup = None  # (side_to_trade, extreme, i_extreme, move_start_price, rsi_ok)
         for i in range(mb + 1, n):
             ai = a[i]
@@ -131,7 +140,14 @@ class ReversalTrail(Strategy):
             setup = None
             if risk <= 0 or risk > p["max_stop_atr"] * ai:
                 continue
-            if p["target"] == "half_move":
+            if p["target"] == "levels":
+                if finder is None:
+                    finder = TargetFinder(df, self.session.timezone, tp_params(p))
+                hit = finder.find(i, side, float(c[i]), float(st))
+                if hit is None:
+                    continue                                       # nothing worth >= tp_min_r in reach
+                tgt[i], kind[i] = hit
+            elif p["target"] == "half_move":
                 t_px = ext + side * 0.5 * abs(start - ext)        # 50% retrace of the fast move
                 if side * (t_px - c[i]) <= 0:
                     continue                                       # already past the halfway point
@@ -150,4 +166,5 @@ class ReversalTrail(Strategy):
         out["spike_pts"] = np.where(out["signal"] != 0, spk, np.nan)
         out["spike_min_r"] = np.where(out["signal"] != 0, float(p["spike_min_r"]), np.nan)
         out["spike_mode"] = np.where(out["signal"] != 0, float(p["spike_mode"]), np.nan)
+        out["tp_kind"] = np.where(out["signal"] != 0, kind, None)
         return out
