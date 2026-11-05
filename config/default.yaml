@@ -134,10 +134,18 @@ tradelocker:
   live_account_ids: []            # fill in only when going live
 
 webhook:
-  host: 0.0.0.0
-  port: 8787
   # TradingView alerts are executed through the same risk engine.
+  enabled: true                   # start the receiver with `atlas run` (no --webhook flag needed)
+  host: 0.0.0.0
+  port: 80                        # TradingView only sends to ports 80/443
   default_reward_risk: 2.0
+  symbol_aliases:                 # TradingView ticker -> GatesFX name
+    XAUUSD: XAUUSD.R
+    GOLD: XAUUSD.R
+  max_alert_age_seconds: 120      # ignore alerts that arrive late
+  max_entry_slip_r: 0.25          # skip if price is already >0.25R past the setup's entry
+  allowed_ips: []                 # optional: TradingView's IPs 52.89.214.238, 34.212.75.30,
+                                  # 54.218.53.128, 52.32.178.7 (secret is checked either way)
 
 monitoring:
   label: "Atlas $10k bot"            # prefix on every Telegram message
