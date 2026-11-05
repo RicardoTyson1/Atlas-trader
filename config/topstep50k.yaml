@@ -10,7 +10,7 @@ account:
 
 prop_rules:
   firm: topstep-50k-practice
-  phase: evaluation
+  phase: funded                   # no "target reached" stop (balance is already above $53k; Ricardo trades on)
   profit_target_pct: 6.0          # $3,000 target
   daily_loss_pct: 2.0             # optional $1,000 DLL
   daily_loss_basis: initial
@@ -32,13 +32,17 @@ risk:
   cooldown_after_loss_minutes: 15 # July 15: re-entered 3 seconds after losses
   max_sizing_equity: 50000
   guardian: true
+  guardian_auto_stop: true        # trade placed without a stop: after the grace time a stop is added at the
+  guardian_stop_grace_seconds: 30 # max loss per trade ($200) and the trade stays open (Ricardo, 2026-11-05)
 
 session:
   timezone: America/New_York
   open: "09:30"
-  trade_start: "02:00"
-  last_entry: "11:00"
-  flat_by: "15:50"
+  # Around the clock (Ricardo, 2026-11-05): entries any time except gold's daily break.
+  trade_start: "00:00"
+  last_entry: "16:30"
+  flat_by: "16:50"                # flat before gold's 17:00 NY daily close
+  reopen: "18:05"
   weekdays: [0, 1, 2, 3, 4]
   overnight: false
 
@@ -61,7 +65,7 @@ strategies: []                    # practice mode: you trade, the guardian enfor
 tradelocker:
   demo_url: https://demo.tradelocker.com
   live_url: https://live.tradelocker.com
-  demo_account_ids: []            # put the new $50k demo account ID here
+  demo_account_ids: [2595168]     # GatesFX TradeLocker DEMO #2595168 (accNum 4), Ricardo's 50K account
   live_account_ids: []
 
 webhook:
@@ -73,6 +77,7 @@ monitoring:
   label: "Atlas $50k guardian"            # prefix on every Telegram message
   healthcheck_env: HEALTHCHECK_URL_TOPSTEP50K      # env var holding this bot's healthchecks.io ping URL
   daily_report: true          # morning "armed" message + end-of-day report
+  poll_seconds: 10            # check every 10 s so a missing stop is fixed fast
 
 paths:
   state_dir: state/topstep50k
