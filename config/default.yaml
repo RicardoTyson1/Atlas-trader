@@ -15,23 +15,23 @@ prop_rules:
   firm: personal-gatesfx
   phase: funded                   # funded = no "profit target reached" stop
   profit_target_pct: 100.0
-  daily_loss_pct: 2.0             # done for the day at -2% (-$200 on $10k)
+  daily_loss_pct: 10.0            # done for the day at -10% (-$1,000 on $10k; bot stops at -9% via safety_buffer)
   daily_loss_basis: start_of_day
-  max_drawdown_pct: 10.0          # bot stops completely at -10% from the start
+  max_drawdown_pct: 30.0          # bot stops completely at -30% from the start ($7,000; bot at -27%)
   drawdown_type: static
   trailing_on: equity
   trail_locks_at_initial: true
   min_trading_days: 0
   safety_buffer: 0.9              # bot stops at 90% of each limit (equity is only checked between polls)
-  daily_breach_permanent: false   # hitting -2% = done for today, NOT a permanent stop
+  daily_breach_permanent: false   # hitting the day limit = done for today, NOT a permanent stop
 
 risk:
-  risk_per_trade_pct: 0.5         # max loss per trade = 0.5% of account ($50 on $10k)
+  risk_per_trade_pct: 5.0         # max loss per trade = 5% of account ($500 on $10k) - set by Ricardo 2026-11-05 (demo)
   max_trades_per_day: 8           # history: median 22/day, up to 74
   max_consecutive_losses: 3       # 3 losses in a row = done for the day
   max_open_positions: 1           # one trade at a time
-  max_lots: 0.5                   # hard cap (history: up to 4 lots on ~$2k)
-  max_room_fraction_per_trade: 0.5
+  max_lots: 2.0                   # hard cap (history: up to 4 lots on ~$2k)
+  max_room_fraction_per_trade: 0.6   # a trade may use at most 60% of the room left to the day/account stop
   cooldown_after_loss_minutes: 15 # history: re-entered 0.7 min after a loss
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
