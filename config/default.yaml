@@ -35,6 +35,8 @@ risk:
   cooldown_after_loss_minutes: 15 # history: re-entered 0.7 min after a loss
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
+  core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
+  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (24/5 lost money in the replay)
 
 session:
   timezone: America/New_York
@@ -116,7 +118,7 @@ strategies:
       spike_atr: 0.0                # as tested (big-candle lock off for this model)
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
-      hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$3,500 (24/5 was -$2,697)
+      hours: "00:00-23:59"          # 24/5 since 2026-11-05 (Ricardo). Replay: 08-11 only +$3,500, 24/5 -$2,697 -> 1% risk off-hours
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Demo forward test alongside reversal_trail (one position at a time).
@@ -130,7 +132,7 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$22,794 (24/5 was -$2,694)
+      hours: "00:00-23:59"          # 24/5 since 2026-11-05 (Ricardo). Replay: 08-11 only +$22,794, 24/5 -$2,694 -> 1% risk off-hours
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
