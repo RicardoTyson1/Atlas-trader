@@ -78,3 +78,14 @@ def test_big_candle_takes_profit():
     assert not spike_exit(1, 100, 98, 3.0, 1.0, o=101.0, c=103.5)    # body 2.5 too small
     assert not spike_exit(1, 100, 98, 3.0, 1.0, o=98.0, c=101.5)     # profit 1.5 < 1R
     assert spike_exit(-1, 100, 102, 3.0, 1.0, o=99.0, c=95.0)        # shorts mirror it
+
+
+def test_runaway_lock_keeps_share_of_best_run():
+    from atlas_trader.backtest import runaway_lock
+    # short from 100, stop 110 (risk 10); best 80 = +2R; keep 60% of 20 -> stop 88
+    assert runaway_lock(-1, 100.0, 110.0, 110.0, 1.5, 0.6, 80.0, 84.0) == 88.0
+    # not far enough yet (+1R < 1.5R)
+    assert runaway_lock(-1, 100.0, 110.0, 110.0, 1.5, 0.6, 90.0, 92.0) is None
+    # never loosens, never puts the stop through price
+    assert runaway_lock(-1, 100.0, 110.0, 85.0, 1.5, 0.6, 80.0, 84.0) is None
+    assert runaway_lock(-1, 100.0, 110.0, 110.0, 1.5, 0.6, 80.0, 89.0) is None
