@@ -133,3 +133,19 @@ def test_eod_trailing_like_topstep(cfg):
     assert r.dd_floor(real=True) == pytest.approx(49000)
     r.new_day("2025-01-08", 53000)
     assert r.dd_floor(real=True) == pytest.approx(50000)  # locked at the starting balance
+
+
+def test_off_hours_risk_is_smaller():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from atlas_trader.config import Instrument, NewsBlackouts, PropRules, RiskSettings, Session
+    from atlas_trader.risk import RiskManager
+    ny = ZoneInfo("America/New_York")
+    rs = RiskSettings(risk_per_trade_pct=5.0, core_hours="08:00-11:00", off_hours_risk_pct=1.0,
+                      max_lots=100, max_room_fraction_per_trade=1.0)
+    rm = RiskManager(PropRules(daily_loss_pct=50, max_drawdown_pct=50), rs, Session(), NewsBlackouts(), 10_000)
+    inst = Instrument(symbol="XAUUSD.R", value_per_point=100.0, min_lot=0.01, lot_step=0.01)
+    core = rm.size(4100.0, 4090.0, inst, 10_000, when=datetime(2026, 11, 6, 9, 0, tzinfo=ny))
+    off = rm.size(4100.0, 4090.0, inst, 10_000, when=datetime(2026, 11, 6, 20, 0, tzinfo=ny))
+    assert rm.risk_pct_at(datetime(2026, 11, 6, 11, 0, tzinfo=ny)) == 1.0     # 11:00 is outside
+    assert core == 0.5 and off == 0.1                                          # $500 vs $100 at 10-pt risk
