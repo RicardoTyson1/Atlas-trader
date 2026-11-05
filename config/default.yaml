@@ -39,9 +39,12 @@ risk:
 session:
   timezone: America/New_York
   open: "09:30"
-  trade_start: "02:00"            # London killzone opens
-  last_entry: "11:00"             # no new entries (bot or manual) after this
-  flat_by: "15:50"                # everything closed by this time, every day
+  # Around the clock (24/5): gold trades ~23h a day. The bot (and manual trades, via the
+  # guardian) may enter any time except the daily break; everything is flat during the break.
+  trade_start: "00:00"
+  last_entry: "16:30"             # last entry before the daily break
+  flat_by: "16:50"                # flat before gold's 17:00 NY daily close, every day (and Friday)
+  reopen: "18:05"                 # entries resume after the reopen (Asia session)
   weekdays: [0, 1, 2, 3, 4]       # Mon-Fri
   overnight: false
 
@@ -91,23 +94,22 @@ instruments:
 # reversal_trail = Ricardo's video model: fast move (+ extreme RSI) -> change of character
 # -> entry; stop beyond the move's extreme; take profit at 50% of the move, or early on an
 # aggressive candle in our favor; candle-by-candle trailing stop. Both directions
-# (oversold -> long, overbought -> short). NY morning only for now.
+# (oversold -> long, overbought -> short). Trades all sessions (24/5).
 # Status: UNPROVEN. Demo forward test only (replaces liquidity_fvg, which failed testing).
 # Weak/strong ranking: research/shootout.py; drop whatever the shoot-out and demo show is weak.
 strategies:
   - name: reversal_trail
     instruments: [XAUUSD.R]
-    timeframe: 5m
+    timeframe: 1m                   # shoot-out: 1m, move 5 ATR, RSI 25, half-move target = 68.6% wins, +0.08R
     history_bars: 600
     params:
-      move_atr: 3.0
+      move_atr: 5.0
       rsi_level: 25
       target: half_move
-      spike_atr: 2.5
-      spike_min_r: 1.0
+      spike_atr: 0.0                # as tested (big-candle lock off for this model)
       trail_start_r: 1.0
       trail_buf_atr: 0.3
-      hours: "08:00-11:00"          # bot session allows entries 02:00-11:00 NY only; evening needs a session change
+      hours: "00:00-23:59"          # all sessions; the session block above enforces the daily break
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Demo forward test alongside reversal_trail (one position at a time).
@@ -115,13 +117,13 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 5m
     history_bars: 600
-    params:
-      disp_atr: 1.2
+    params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
+      disp_atr: 1.0
       trend_filter: true
       trail_start_r: 1.0
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "08:00-11:00"
+      hours: "00:00-23:59"
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
