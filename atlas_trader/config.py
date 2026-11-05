@@ -105,12 +105,32 @@ class StrategySpec:
 class NewsBlackouts:
     minutes_before: int = 15
     minutes_after: int = 15
-    events: list[datetime] = field(default_factory=list)  # tz-aware
+    events: list[datetime] = field(default_factory=list)  # tz-aware, from the config
+    feed_file: str | None = None      # calendar events saved by atlas_trader.news.refresh
+    feed: dict[str, Any] = field(default_factory=dict)    # url / countries / impacts / refresh_hours
+    _feed_mtime: float = field(default=-1.0, repr=False)
+    _feed_events: list[datetime] = field(default_factory=list, repr=False)
+
+    def _reload(self) -> None:
+        if not self.feed_file:
+            return
+        from .news import event_times
+        try:
+            m = Path(self.feed_file).stat().st_mtime
+        except OSError:
+            return
+        if m != self._feed_mtime:
+            self._feed_events = event_times(self.feed_file)
+            self._feed_mtime = m
+
+    def all_events(self) -> list[datetime]:
+        self._reload()
+        return list(self.events) + list(self._feed_events)
 
     def active(self, ts: datetime) -> bool:
         b = timedelta(minutes=self.minutes_before)
         a = timedelta(minutes=self.minutes_after)
-        return any(ev - b <= ts <= ev + a for ev in self.events)
+        return any(ev - b <= ts <= ev + a for ev in self.all_events())
 
 
 @dataclass
@@ -156,7 +176,8 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         datetime.strptime(e, "%Y-%m-%d %H:%M").replace(tzinfo=session.tz)
         for e in (nb.get("events") or [])
     ]
-    news = NewsBlackouts(nb.get("minutes_before", 15), nb.get("minutes_after", 15), events)
+    news = NewsBlackouts(nb.get("minutes_before", 15), nb.get("minutes_after", 15), events,
+                         feed_file=nb.get("feed_file"), feed=dict(nb.get("feed") or {}))
     instruments = {
         sym: Instrument(symbol=sym, **(vals or {}))
         for sym, vals in (raw.get("instruments") or {}).items()

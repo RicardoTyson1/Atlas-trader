@@ -136,6 +136,7 @@ class Runner:
         self._detect_closed(positions, acct.balance, local)
         for ev in self.rm.update(acct.equity, acct.balance, when=local.strftime("%Y-%m-%d %H:%M")):
             self.notify.send(ev, logging.WARNING)
+        self._news_refresh(now)
         self._daily_reports(local, acct)
 
         if self.cfg.risk.guardian:
@@ -478,6 +479,40 @@ class Runner:
             rep["day"] = day
         return rep
 
+    def _news_refresh(self, now: pd.Timestamp) -> None:
+        """Download the economic calendar at start and every `refresh_hours` (background)."""
+        nb = self.cfg.news
+        if not nb.feed_file or not nb.feed:
+            return
+        hours = float(nb.feed.get("refresh_hours", 6))
+        last = getattr(self, "_news_last", None)
+        if last is not None and now - last < pd.Timedelta(hours=hours):
+            return
+        self._news_last = now
+
+        def work():
+            from .news import DEFAULT_URL, refresh
+            try:
+                refresh(nb.feed_file, nb.feed.get("url", DEFAULT_URL),
+                        tuple(nb.feed.get("countries", ["USD"])), tuple(nb.feed.get("impacts", ["High"])))
+            except Exception as e:  # keep using the last saved calendar
+                log.warning("news calendar refresh failed: %r", e)
+                self._alert_once(f"newsfail:{now.date()}", f"Could not update the news calendar ({e!r}); "
+                                 "using the last saved one.", logging.WARNING)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _news_today(self, local) -> str:
+        evs = [e for e in self.cfg.news.all_events() if e.astimezone(local.tzinfo).date() == local.date()]
+        if not evs:
+            return " No high-impact news today."
+        from .news import load
+        titles = {e["time"]: e["title"] for e in load(self.cfg.news.feed_file)} if self.cfg.news.feed_file else {}
+        items = [f"{e.astimezone(local.tzinfo):%H:%M} {titles.get(e.isoformat(), 'news')}" for e in sorted(evs)]
+        nb = self.cfg.news
+        return (f" News today (no trades {nb.minutes_before} min before to {nb.minutes_after} min after, "
+                f"open trades closed): " + "; ".join(items) + ".")
+
     def _daily_reports(self, local, acct) -> None:
         if not self.cfg.monitoring.get("daily_report", True):
             return
@@ -496,6 +531,7 @@ class Runner:
                 + (f"Entries around the clock; flat {self.cfg.session.flat_by:%H:%M}-{self.cfg.session.reopen:%H:%M} NY daily break."
                  if self.cfg.session.reopen is not None else
                  f"Entries {self.cfg.session.trade_start:%H:%M}-{self.cfg.session.last_entry:%H:%M} NY.")
+                + self._news_today(local)
             )
         if not rep.get("eod") and m >= _mins(self.cfg.session.flat_by) + 5:
             rep["eod"] = True
