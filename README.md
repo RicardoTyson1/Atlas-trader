@@ -94,14 +94,21 @@ atlas run --mode live --i-accept-real-money-risk
 
 ## TradingView alerts
 
-Run with `--webhook` on a server with a public address. In the TradingView
-alert, set the Webhook URL to `http://YOUR_SERVER:8787/tv` and the message to:
+With `webhook.enabled: true` (default config) `atlas run` also listens on
+**port 80** (TradingView only sends webhooks to ports 80/443). Webhook URL:
+`http://YOUR_SERVER_IP/tv`.
+
+The indicator `pine/atlas_silver_bullet.pine` draws the 10-11 AM Silver Bullet
+setups on a 5-minute gold chart and sends the bot its own messages. Setup steps:
+`docs/TRADINGVIEW_SOP.md`. A hand-written alert message looks like:
 ```json
-{"secret": "YOUR_WEBHOOK_SECRET", "symbol": "NAS100", "action": "buy", "stop": {{low}}, "rr": 2}
+{"secret": "YOUR_WEBHOOK_SECRET", "symbol": "XAUUSD", "action": "buy", "stop": {{low}}, "rr": 2}
 ```
 `action` can be `buy`, `sell` or `close`. The bot sizes the position, checks
-every rule and attaches the SL/TP. A visit to `GET /` returns the current risk
-status.
+every rule and attaches the SL/TP. Repeated alert ids, alerts older than 2
+minutes and entries more than 0.25R past the setup's price are skipped. The
+result of every alert goes to Telegram. `GET /tv` only answers "ok" (no account
+details on the public internet; use `atlas status` on the server).
 
 ## Running 24/7
 
