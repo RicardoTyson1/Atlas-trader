@@ -3,7 +3,7 @@
 // Draws the same setups the bot's research tested (atlas_trader/strategies/ict.py,
 // SilverBullet preset; docs/RESULTS_ICT_2026-11-05.md) and, when a setup's entry
 // price is reached, sends the Atlas bot a webhook message. The bot then sizes the
-// trade (0.5% risk), checks every rule (hours, cooldown, daily stop, one trade at a
+// trade (with its own risk setting), checks every rule (hours, cooldown, daily stop, one trade at a
 // time) and places it on the GatesFX demo with stop-loss and target attached.
 //
 // Rules (times New York, 5-minute chart, gold):
