@@ -41,7 +41,7 @@ int    expBars    = input.int(6, "Limit entry rests for (bars)", minval = 1, gro
 
 string G2 = "Alerts to the Atlas bot"
 bool   alertsOn = input.bool(true, "Send entry alerts to the bot", group = G2)
-string secret   = input.string("", "Webhook secret (WEBHOOK_SECRET on the server)", group = G2)
+string secret   = input.string("", "Webhook secret (WEBHOOK_SECRET on the server)", group = G2, display = display.none)  // never shown in the legend
 string botSym   = input.string("XAUUSD.R", "Bot symbol", group = G2)
 
 string G3 = "Display"
