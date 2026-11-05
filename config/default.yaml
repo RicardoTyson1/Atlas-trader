@@ -132,7 +132,22 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "00:00-23:59"          # 24/5 since 2026-11-05 (Ricardo). Replay: 08-11 only +$22,794, 24/5 -$2,694 -> 1% risk off-hours
+      hours: "08:00-11:00"          # 5-minute version in the core window (replay 08-11 only: +$22,794)
+  # Outside 08:00-11:00 Ricardo wants 1-minute trading and 1-minute trailing (2026-11-05):
+  # same rules on 1-minute candles, 1% risk (risk.off_hours_risk_pct). Not replay-tested on 1m
+  # off-hours; the Friday review judges it as its own strategy (momentum_rsi_1m).
+  - name: momentum_rsi
+    label: momentum_rsi_1m
+    instruments: [XAUUSD.R]
+    timeframe: 1m
+    history_bars: 600
+    params:
+      disp_atr: 1.0
+      trend_filter: true
+      trail_start_r: 1.0
+      trail_buf_atr: 0.3
+      spike_atr: 2.0
+      hours: "00:00-08:00,11:00-23:59"
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
