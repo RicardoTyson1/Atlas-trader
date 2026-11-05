@@ -217,12 +217,14 @@ class Runner:
             trail=None if pd.isna(trs) else (float(trs), 0.0 if pd.isna(tbuf) else float(tbuf)),
             spike=None if pd.isna(spk) else (float(spk), 1.0 if pd.isna(spr) else float(spr),
                                              2 if pd.isna(spm) else int(spm)),
+            tp_note=row.get("tp_kind") if isinstance(row.get("tp_kind"), str) else None,
         )
 
     # ------------------------------------------------------------ entries
     def _try_enter(self, sym, side, stop, target, rr, local, equity, n_open, source,
                    max_bars: float | None = None, trail: tuple[float, float] | None = None,
-                   spike: tuple[float, float, int] | None = None, worst_price: float | None = None) -> str:
+                   spike: tuple[float, float, int] | None = None, worst_price: float | None = None,
+                   tp_note: str | None = None) -> str:
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open)
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
@@ -256,8 +258,8 @@ class Runner:
         self.save()                                    # never lose track of a live order
         risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
         self.notify.send(
-            f"{'BUY' if side > 0 else 'SELL'} {qty} {sym} @~{price:.2f} SL {stop:.2f} TP {target:.2f} "
-            f"(risk ~${risk_usd:,.0f}, {source})"
+            f"{'BUY' if side > 0 else 'SELL'} {qty} {sym} @~{price:.2f} SL {stop:.2f} TP {target:.2f}"
+            f"{f' ({tp_note})' if tp_note else ''} (risk ~${risk_usd:,.0f}, {source})"
         )
         return "entered"
 
