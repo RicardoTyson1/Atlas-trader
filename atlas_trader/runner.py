@@ -181,8 +181,13 @@ class Runner:
             return None                              # nothing new since last evaluation
         bars = self.broker.bars(sym, spec.timeframe, spec.history_bars)
         m = local.hour * 60 + local.minute
-        in_window = (local.weekday() in self.cfg.session.weekdays
-                     and _mins(self.cfg.session.trade_start) <= m <= _mins(self.cfg.session.last_entry))
+        sess = self.cfg.session
+        if sess.reopen is not None:
+            fri_close = local.weekday() == 4 and m >= _mins(sess.flat_by)   # weekend: market shut
+            in_window = local.weekday() in sess.weekdays and not sess.in_break(m) and not fri_close
+        else:
+            in_window = (local.weekday() in sess.weekdays
+                         and _mins(sess.trade_start) <= m <= _mins(sess.last_entry))
         if bars.empty or bars.index[-1] + 2 * tf < now:
             if in_window:
                 self._alert_once(f"stale:{key}:{local.date()}",
@@ -481,7 +486,9 @@ class Runner:
                 f"Good morning. {status}. Balance ${acct.balance:,.2f}. "
                 f"Day stop at ${self.rm.daily_floor():,.0f}, account stop at ${self.rm.dd_floor():,.0f}. "
                 f"Max {self.cfg.risk.max_trades_per_day} trades, {self.cfg.risk.risk_per_trade_pct}% risk each. "
-                f"Entries {self.cfg.session.trade_start:%H:%M}-{self.cfg.session.last_entry:%H:%M} NY."
+                + (f"Entries around the clock; flat {self.cfg.session.flat_by:%H:%M}-{self.cfg.session.reopen:%H:%M} NY daily break."
+                 if self.cfg.session.reopen is not None else
+                 f"Entries {self.cfg.session.trade_start:%H:%M}-{self.cfg.session.last_entry:%H:%M} NY.")
             )
         if not rep.get("eod") and m >= _mins(self.cfg.session.flat_by) + 5:
             rep["eod"] = True

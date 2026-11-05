@@ -63,6 +63,18 @@ class Session:
     flat_by: time = time(15, 50)
     weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
     overnight: bool = False   # True = positions may be held past flat_by / overnight
+    # Around-the-clock mode: if set, the market is closed only between flat_by and reopen
+    # (e.g. gold's daily break 16:50-18:05 NY). Entries are allowed from reopen to last_entry
+    # (wrapping past midnight) and everything is flattened during the break, every day.
+    reopen: time | None = None
+
+    def in_break(self, m: int) -> bool:
+        """True if `m` (minutes since local midnight) is inside the daily break."""
+        f = self.flat_by.hour * 60 + self.flat_by.minute
+        if self.reopen is None:
+            return m >= f
+        r = self.reopen.hour * 60 + self.reopen.minute
+        return f <= m < r
 
     @property
     def tz(self) -> ZoneInfo:
@@ -137,6 +149,7 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         flat_by=_t(s.get("flat_by", "15:50")),
         weekdays=tuple(s.get("weekdays", [0, 1, 2, 3, 4])),
         overnight=bool(s.get("overnight", False)),
+        reopen=_t(s["reopen"]) if s.get("reopen") else None,
     )
     nb = raw.get("news_blackouts", {}) or {}
     events = [

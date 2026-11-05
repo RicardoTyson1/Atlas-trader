@@ -175,7 +175,10 @@ class RiskManager:
         if ts_local.weekday() not in self.session.weekdays:
             return False, "not a trading weekday"
         m = ts_local.hour * 60 + ts_local.minute
-        if m < _mins(self.session.trade_start) or m > _mins(self.session.last_entry):
+        if self.session.reopen is not None:
+            if self.session.in_break(m) or (_mins(self.session.last_entry) < m < _mins(self.session.flat_by)):
+                return False, "outside entry window (daily break)"
+        elif m < _mins(self.session.trade_start) or m > _mins(self.session.last_entry):
             return False, "outside entry window"
         if self.news.active(ts_local):
             return False, "news blackout"
@@ -191,7 +194,7 @@ class RiskManager:
 
     def must_flatten(self, ts_local: datetime) -> str | None:
         m = ts_local.hour * 60 + ts_local.minute
-        if not self.session.overnight and m >= _mins(self.session.flat_by):
+        if not self.session.overnight and self.session.in_break(m):
             return "end of session"
         if self.news.active(ts_local):
             return "news blackout"
