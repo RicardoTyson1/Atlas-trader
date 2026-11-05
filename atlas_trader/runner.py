@@ -241,7 +241,7 @@ class Runner:
         if side * (target - price) <= 0:
             return "skipped:price already past the target"
         inst = self.cfg.instrument(sym)
-        qty = self.rm.size(price, stop, inst, equity)
+        qty = self.rm.size(price, stop, inst, equity, when=local.to_pydatetime() if hasattr(local, "to_pydatetime") else local)
         if qty <= 0:
             return "skipped:size below minimum lot (stop too wide for risk budget)"
         bal_before = self.broker.account().balance     # before the opening fee is charged
@@ -535,7 +535,9 @@ class Runner:
             self.notify.send(
                 f"Good morning. {status}. Balance ${acct.balance:,.2f}. "
                 f"Day stop at ${self.rm.daily_floor():,.0f}, account stop at ${self.rm.dd_floor():,.0f}. "
-                f"Max {self.cfg.risk.max_trades_per_day} trades, {self.cfg.risk.risk_per_trade_pct}% risk each. "
+                f"Max {self.cfg.risk.max_trades_per_day} trades, {self.cfg.risk.risk_per_trade_pct}% risk each"
+                + (f" ({self.cfg.risk.off_hours_risk_pct}% outside {self.cfg.risk.core_hours} NY). "
+                   if self.cfg.risk.core_hours and self.cfg.risk.off_hours_risk_pct is not None else ". ")
                 + (f"Entries around the clock; flat {self.cfg.session.flat_by:%H:%M}-{self.cfg.session.reopen:%H:%M} NY daily break."
                  if self.cfg.session.reopen is not None else
                  f"Entries {self.cfg.session.trade_start:%H:%M}-{self.cfg.session.last_entry:%H:%M} NY.")

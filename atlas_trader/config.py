@@ -52,6 +52,8 @@ class RiskSettings:
     cooldown_after_loss_minutes: int = 15     # no new entry this long after a losing trade
     max_sizing_equity: float | None = None    # never size from more than this (e.g. own money, no bonus)
     guardian: bool = True                     # police ALL positions on the account, incl. manual ones
+    core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
+    off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
 
 
 @dataclass

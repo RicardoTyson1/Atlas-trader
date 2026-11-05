@@ -207,12 +207,26 @@ class RiskManager:
         dist = abs(entry - stop) + inst.spread_points + inst.slippage_points
         return dist * inst.value_per_point + 2 * inst.commission_per_lot
 
-    def size(self, entry: float, stop: float, inst: Instrument, equity: float) -> float:
+    def risk_pct_at(self, when: datetime | None = None) -> float:
+        """Risk per trade (%) for an entry at `when` (local time): full inside core_hours,
+        `off_hours_risk_pct` outside them."""
+        r = self.risk
+        if when is None or not r.core_hours or r.off_hours_risk_pct is None:
+            return r.risk_per_trade_pct
+        m = when.hour * 60 + when.minute
+        for rng in str(r.core_hours).split(","):
+            a, b = rng.strip().split("-")
+            if int(a[:2]) * 60 + int(a[3:]) <= m < int(b[:2]) * 60 + int(b[3:]):
+                return r.risk_per_trade_pct
+        return float(r.off_hours_risk_pct)
+
+    def size(self, entry: float, stop: float, inst: Instrument, equity: float,
+             when: datetime | None = None) -> float:
         """Lots to trade so a stop-out loses at most the allowed amount. 0 = don't trade."""
         if entry == stop or equity <= 0:
             return 0.0
         sizing_base = min(equity, self.risk.max_sizing_equity) if self.risk.max_sizing_equity else equity
-        budget = sizing_base * self.risk.risk_per_trade_pct / 100.0
+        budget = sizing_base * self.risk_pct_at(when) / 100.0
         # room to the halt levels is measured on the REAL equity
         room = min(equity - self.daily_floor(), equity - self.dd_floor())
         budget = min(budget, room * self.risk.max_room_fraction_per_trade)

@@ -215,7 +215,7 @@ def run_backtest(
             if ok and side * (fill - stop) > 0:
                 target = tgt if not np.isnan(tgt) else fill + side * rr * abs(fill - stop)
                 if side * (target - fill) > 0:
-                    lots = rm.size(fill, stop, inst, balance)
+                    lots = rm.size(fill, stop, inst, balance, when=ts_open_local)
                     if lots > 0:
                         balance -= inst.commission_per_lot * lots
                         pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb,
