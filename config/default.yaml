@@ -94,7 +94,7 @@ instruments:
 # reversal_trail = Ricardo's video model: fast move (+ extreme RSI) -> change of character
 # -> entry; stop beyond the move's extreme; take profit at 50% of the move, or early on an
 # aggressive candle in our favor; candle-by-candle trailing stop. Both directions
-# (oversold -> long, overbought -> short). Trades all sessions (24/5).
+# (oversold -> long, overbought -> short). Entries 08:00-11:00 NY (its tested, profitable window).
 # Status: UNPROVEN. Demo forward test only (replaces liquidity_fvg, which failed testing).
 # Weak/strong ranking: research/shootout.py; drop whatever the shoot-out and demo show is weak.
 strategies:
@@ -109,7 +109,7 @@ strategies:
       spike_atr: 0.0                # as tested (big-candle lock off for this model)
       trail_start_r: 1.0
       trail_buf_atr: 0.3
-      hours: "00:00-23:59"          # all sessions; the session block above enforces the daily break
+      hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$3,500 (24/5 was -$2,697)
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Demo forward test alongside reversal_trail (one position at a time).
@@ -123,7 +123,7 @@ strategies:
       trail_start_r: 1.0
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "00:00-23:59"
+      hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$22,794 (24/5 was -$2,694)
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
