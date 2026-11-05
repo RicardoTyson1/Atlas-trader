@@ -8,9 +8,11 @@ from .time_drift import TimeDrift
 from .liquidity_fvg import LiquidityFVG
 from .silver_bullet import SilverBullet
 from .break_retest import BreakRetest
+from .reversal_trail import ReversalTrail
+from .momentum_rsi import MomentumRSI
 
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest)
+    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest, ReversalTrail, MomentumRSI)
 }
 
 
