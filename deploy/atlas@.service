@@ -17,6 +17,8 @@ ExecStart=/opt/atlas-trader/.venv/bin/atlas --config config/%i.yaml run --mode d
 # a kill-switch stop exits cleanly and stays stopped
 Restart=on-failure
 RestartSec=300
+# lets the non-root "atlas" user listen on port 80 for TradingView webhooks
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
