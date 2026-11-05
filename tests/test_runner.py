@@ -208,3 +208,35 @@ def test_off_hours_trailing_uses_1m_candles(cfg):
     spec, strat = runner.strats[0]
     runner._manage_exit(spec, strat, "NAS100", t)
     assert "1m" in calls
+
+
+def _auto_stop_runner(cfg):
+    cfg.strategies = []
+    cfg.risk.guardian_auto_stop = True
+    cfg.risk.guardian_stop_grace_seconds = 30
+    base, broker, runner, t = _guard_setup(cfg)
+    return base, broker, runner, t
+
+
+def test_guardian_gives_time_then_adds_stop_at_max_loss(cfg):
+    base, broker, runner, t = _auto_stop_runner(cfg)
+    pid = broker.add_manual("NAS100", 1, 1.0, stop=None)
+    runner.step(t + pd.Timedelta(seconds=10))           # inside the 30 s grace: nothing happens
+    pos = broker.positions()[0]
+    assert not pos.has_stop and pos.id == pid
+    acts = runner.step(t + pd.Timedelta(seconds=40))    # grace over: stop attached, trade kept
+    pos = broker.positions()[0]
+    assert "guardian:stop added" in acts and pos.has_stop and pos.id == pid
+    max_loss = runner._max_loss_usd(cfg.starting_balance, t)
+    assert abs((pos.entry - pos.stop) * pos.qty * 1.0 - max_loss) < 0.02
+    assert any("GUARDIAN added a stop" in m for m in runner.notify.messages)
+
+
+def test_guardian_closes_if_already_past_max_loss(cfg):
+    cfg.risk.max_lots = 100.0                             # so only the max-loss rule can close it
+    base, broker, runner, t = _auto_stop_runner(cfg)
+    broker.add_manual("NAS100", 1, 50.0, stop=None)       # big size: max loss is only a few points away
+    broker.positions()[0].entry += 100                    # entered far above the current price
+    runner.step(t + pd.Timedelta(seconds=40))
+    assert not broker.positions()
+    assert any("past the max loss" in m for m in runner.notify.messages)
