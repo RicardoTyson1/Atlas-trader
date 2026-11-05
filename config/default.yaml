@@ -27,12 +27,12 @@ prop_rules:
 
 risk:
   risk_per_trade_pct: 5.0         # max loss per trade = 5% of account ($500 on $10k) - set by Ricardo 2026-11-05 (demo)
-  max_trades_per_day: 8           # history: median 22/day, up to 74
-  max_consecutive_losses: 3       # 3 losses in a row = done for the day
+  max_trades_per_day: 100000      # no cap (demo learning mode since 2026-11-05, Ricardo); was 8
+  max_consecutive_losses: 100000  # no cap (demo learning mode); was 3 in a row = done for the day
   max_open_positions: 1           # one trade at a time
   max_lots: 2.0                   # hard cap (history: up to 4 lots on ~$2k)
   max_room_fraction_per_trade: 0.6   # a trade may use at most 60% of the room left to the day/account stop
-  cooldown_after_loss_minutes: 15 # history: re-entered 0.7 min after a loss
+  cooldown_after_loss_minutes: 0  # no cooldown (demo learning mode); was 15
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
