@@ -41,6 +41,10 @@ class Trade:
     reason: str = ""
     max_bars: float = float("nan")
     bars: int = 0
+    init_stop: float = float("nan")
+    trail_start_r: float = float("nan")   # start trailing once open profit >= this x initial risk
+    trail_buf: float = 0.0                # room left beyond the pullback wick (price units)
+    stop_moves: int = 0
 
 
 @dataclass
@@ -73,6 +77,8 @@ def run_backtest(
     srr = sigs["rr"].to_numpy(float)
     sexit = sigs["exit"].to_numpy(int) if "exit" in sigs else np.zeros(len(sigs), dtype=int)
     smaxb = sigs["max_bars"].to_numpy(float) if "max_bars" in sigs else np.full(len(sigs), np.nan)
+    strail = sigs["trail_start_r"].to_numpy(float) if "trail_start_r" in sigs else np.full(len(sigs), np.nan)
+    stbuf = sigs["trail_buf"].to_numpy(float) if "trail_buf" in sigs else np.zeros(len(sigs))
     overnight = cfg.session.overnight
     days = d["day"].to_numpy()
     tz = cfg.session.tz
@@ -86,7 +92,7 @@ def run_backtest(
 
     balance = initial
     pos: Trade | None = None
-    pending: tuple[int, float, float, float, float] | None = None
+    pending: tuple | None = None
     trades: list[Trade] = []
     equity = np.empty(n)
     events: list[str] = []
@@ -102,7 +108,7 @@ def run_backtest(
         gross = pos.side * (fill - pos.entry) * pos.lots * vpp
         pnl = gross - inst.commission_per_lot * pos.lots  # exit commission
         balance += pnl
-        risk_pts = abs(pos.entry - pos.stop)
+        risk_pts = abs(pos.entry - pos.init_stop)
         pos.exit_time, pos.exit, pos.reason = idx[i], fill, reason
         pos.pnl = pnl - inst.commission_per_lot * pos.lots  # include entry commission in trade pnl
         pos.r = pos.side * (fill - pos.entry) / risk_pts if risk_pts else 0.0
@@ -125,7 +131,7 @@ def run_backtest(
 
         # 1) entry at this bar's open
         if pending is not None and pos is None:
-            side, stop, tgt, rr, maxb = pending
+            side, stop, tgt, rr, maxb, trs, tbuf = pending
             ok, _ = rm.check_entry(ts_open_local, open_positions=0)
             fill = o[i] + side * half_cost
             if ok and side * (fill - stop) > 0:
@@ -134,7 +140,8 @@ def run_backtest(
                     lots = rm.size(fill, stop, inst, balance)
                     if lots > 0:
                         balance -= inst.commission_per_lot * lots
-                        pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb)
+                        pos = Trade(inst.symbol, side, idx[i], fill, stop, target, lots, max_bars=maxb,
+                                    init_stop=stop, trail_start_r=trs, trail_buf=tbuf)
                         rm.record_entry()
         pending = None
 
@@ -190,13 +197,33 @@ def run_backtest(
             if reason:
                 close_pos(i, c[i], reason)
 
+        # 4b) candle trailing stop, decided at this bar's close, live from the next bar:
+        #     once open profit >= trail_start_r x initial risk, after a pullback candle
+        #     followed by a strong candle in the trade's direction, move the stop to just
+        #     beyond the pullback candle's wick. The stop only ever moves in the trade's favor.
+        if pos is not None and not np.isnan(pos.trail_start_r) and i >= 1:
+            s_ = pos.side
+            risk0 = abs(pos.entry - pos.init_stop)
+            if s_ * (c[i] - pos.entry) >= pos.trail_start_r * risk0:
+                rng = h[i] - l[i]
+                strong = rng > 0 and s_ * (c[i] - o[i]) >= 0.5 * rng
+                counter_body = s_ * (c[i - 1] - o[i - 1]) < 0
+                dipped = i >= 2 and (l[i - 1] < l[i - 2] if s_ == 1 else h[i - 1] > h[i - 2])
+                pulled = counter_body or dipped
+                if strong and pulled:
+                    new = l[i - 1] - pos.trail_buf if s_ == 1 else h[i - 1] + pos.trail_buf
+                    if s_ * (new - pos.stop) > 0 and s_ * (c[i] - new) > 0:
+                        pos.stop = new
+                        pos.stop_moves += 1
+
         equity[i] = balance + (
             pos.side * (c[i] - pos.side * half_cost - pos.entry) * pos.lots * vpp if pos else 0.0
         )
 
         # 5) new signal at this bar's close
         if pos is None and sig[i] != 0 and i + 1 < n and (overnight or days[i + 1] == days[i]):
-            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]))
+            pending = (int(sig[i]), float(sstop[i]), float(stgt[i]), float(srr[i]), float(smaxb[i]),
+                       float(strail[i]), float(stbuf[i]) if not np.isnan(stbuf[i]) else 0.0)
 
     if cur_day is not None:
         day_rows.append({"day": cur_day, "start": day_start_bal, "end": balance, "min_equity": day_min_eq})
