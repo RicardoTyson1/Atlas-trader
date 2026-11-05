@@ -107,7 +107,7 @@ strategies:
       rsi_level: 25
       target: half_move
       spike_atr: 0.0                # as tested (big-candle lock off for this model)
-      trail_start_r: 1.0
+      trail_start_r: 0.0             # Ricardo: trail behind pullback wicks as soon as the trade is in profit
       trail_buf_atr: 0.3
       hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$3,500 (24/5 was -$2,697)
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
@@ -120,7 +120,7 @@ strategies:
     params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
       disp_atr: 1.0
       trend_filter: true
-      trail_start_r: 1.0
+      trail_start_r: 0.0             # Ricardo: trail behind pullback wicks as soon as the trade is in profit
       trail_buf_atr: 0.3
       spike_atr: 2.0
       hours: "08:00-11:00"          # NY morning only: 1-yr replay at 5% risk = +$22,794 (24/5 was -$2,694)
