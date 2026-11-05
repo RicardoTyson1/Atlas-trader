@@ -181,6 +181,18 @@ class TradeLockerBroker(Broker):
             raise RuntimeError(f"Order rejected for {symbol}")
         raise RuntimeError(f"Order {oid} for {symbol} accepted but no position appeared within ~6s")
 
+    def modify_stop(self, position_id: str, stop: float, target: float | None = None) -> bool:
+        """PATCH /trade/positions/{id}. Only ever called to move a stop in the trade's favor;
+        if it fails the existing broker-side stop stays where it was."""
+        params: dict = {"stopLoss": float(stop)}
+        if target is not None:
+            params["takeProfit"] = float(target)
+        try:
+            return bool(self.api.modify_position(int(position_id), params))
+        except Exception as e:  # never let a failed modify take the bot down
+            log.warning("modify_stop %s failed: %r", position_id, e)
+            return False
+
     def close_position(self, position_id: str) -> None:
         self.api.close_position(position_id=int(position_id))
 

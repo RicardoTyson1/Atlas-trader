@@ -98,6 +98,15 @@ class SimBroker(Broker):
             if p.id == position_id:
                 self._close(s, self._mark(s), self.now)
 
+    def modify_stop(self, position_id: str, stop: float, target: float | None = None) -> bool:
+        for p in self._pos.values():
+            if p.id == position_id:
+                p.stop = stop
+                if target is not None:
+                    p.target = target
+                return True
+        return False
+
     def add_manual(self, symbol: str, side: int, qty: float, stop: float | None = None) -> str:
         """Test helper: a position opened by hand (outside the bot)."""
         pid = f"m{next(self._ids)}"

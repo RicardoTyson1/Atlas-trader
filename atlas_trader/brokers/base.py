@@ -48,6 +48,13 @@ class Broker(ABC):
     @abstractmethod
     def close_position(self, position_id: str) -> None: ...
 
+    def modify_stop(self, position_id: str, stop: float, target: float | None = None) -> bool:
+        """Move a position's broker-side stop (and keep its target). True on success.
+
+        Brokers that cannot do this return False, and the original stop stays in place.
+        """
+        return False
+
     def quote(self, symbol: str) -> tuple[float, float]:
         """(bid, ask). Default: last 1m close for both."""
         px = self.last_price(symbol)
