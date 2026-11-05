@@ -1,0 +1,306 @@
+// Atlas Trader: Silver Bullet indicator for TradingView (Pine Script v6)
+//
+// Draws the same setups the bot's research tested (atlas_trader/strategies/ict.py,
+// SilverBullet preset; docs/RESULTS_ICT_2026-11-05.md) and, when a setup's entry
+// price is reached, sends the Atlas bot a webhook message. The bot then sizes the
+// trade (0.5% risk), checks every rule (hours, cooldown, daily stop, one trade at a
+// time) and places it on the GatesFX demo with stop-loss and target attached.
+//
+// Rules (times New York, 5-minute chart, gold):
+//   1. Liquidity  = the last confirmed swing high / low (3 bars each side).
+//   2. Sweep      = inside the window (default 10:00-11:00), a candle trades beyond the
+//                   swing and CLOSES back inside it.
+//   3. Confirm    = within 12 bars, a displacement fair value gap in the reversal
+//                   direction (middle candle body >= 1 x ATR(14)).
+//   4. Entry      = limit at the gap's 50% (CE), resting 6 bars.
+//   5. Stop       = beyond the sweep extreme + 0.1 x ATR.  Target = 2R.
+//   6. One setup per trading day (day starts 18:00 NY).  Flat by 15:50.
+// Status: a research LEAD, not a proven edge. Demo only.
+//
+// Setup: docs/TRADINGVIEW_SOP.md
+//@version=6
+indicator("Atlas Silver Bullet", shorttitle = "Atlas SB", overlay = true, max_boxes_count = 300, max_lines_count = 500, max_labels_count = 500)
+
+const string TZ = "America/New_York"
+
+// ---------------------------------------------------------------- inputs
+string G1 = "Setup (same rules as the bot's research)"
+bool   inLon      = input.bool(false, "London window 03:00-04:00", group = G1)
+bool   inAM       = input.bool(true, "AM window 10:00-11:00 (the tested lead)", group = G1)
+bool   inPM       = input.bool(false, "PM window 14:00-15:00", group = G1)
+string entryMode  = input.string("CE (50% of gap)", "Entry", options = ["CE (50% of gap)", "Gap edge"], group = G1)
+string targetMode = input.string("Fixed R", "Target", options = ["Fixed R", "Opposite swing (liquidity)"], group = G1)
+float  rrIn       = input.float(2.0, "Reward : risk", minval = 0.5, step = 0.5, group = G1)
+float  minRR      = input.float(1.5, "Min R for the liquidity target", minval = 0.5, step = 0.25, group = G1)
+string biasMode   = input.string("None", "Bias filter", options = ["None", "Discount / premium (20-day range)"], group = G1)
+float  dispAtr    = input.float(1.0, "Displacement body >= x ATR", minval = 0.1, step = 0.1, group = G1)
+int    atrLen     = input.int(14, "ATR length", minval = 1, group = G1)
+float  stopBuf    = input.float(0.1, "Stop buffer beyond the sweep (x ATR)", minval = 0.0, step = 0.05, group = G1)
+int    maxWait    = input.int(12, "Max bars from sweep to FVG", minval = 1, group = G1)
+int    expBars    = input.int(6, "Limit entry rests for (bars)", minval = 1, group = G1)
+
+string G2 = "Alerts to the Atlas bot"
+bool   alertsOn = input.bool(true, "Send entry alerts to the bot", group = G2)
+string secret   = input.string("", "Webhook secret (WEBHOOK_SECRET on the server)", group = G2)
+string botSym   = input.string("XAUUSD.R", "Bot symbol", group = G2)
+
+string G3 = "Display"
+bool showKZ    = input.bool(true, "Shade killzones (London 02-05, NY AM 07-10)", group = G3)
+bool showSBW   = input.bool(true, "Shade Silver Bullet window(s)", group = G3)
+bool showSw    = input.bool(true, "Show swing levels (the liquidity)", group = G3)
+bool showTable = input.bool(true, "Show status and results table", group = G3)
+
+// ---------------------------------------------------------------- time
+int  tfMin  = int(timeframe.in_seconds() / 60)
+bool tfOk   = timeframe.isminutes and timeframe.multiplier == 5
+int  tod    = hour(time, TZ) * 60 + minute(time, TZ)
+int  shT    = time + 6 * 3600000                       // trading day starts 18:00 NY
+int  tday   = year(shT, TZ) * 10000 + month(shT, TZ) * 100 + dayofmonth(shT, TZ)
+bool newDay = tday != tday[1]
+const int FLAT_BY = 15 * 60 + 50
+
+inWin(int s, int e) =>
+    tod >= s and tod + tfMin <= e
+
+bool inSB = (inLon and inWin(180, 240)) or (inAM and inWin(600, 660)) or (inPM and inWin(840, 900))
+
+bgcolor(showKZ and tod >= 120 and tod < 300 ? color.new(color.blue, 94) : na, title = "London killzone")
+bgcolor(showKZ and tod >= 420 and tod < 600 ? color.new(color.teal, 94) : na, title = "NY AM killzone")
+bgcolor(showSBW and inSB ? color.new(color.orange, 85) : na, title = "Silver Bullet window")
+
+// ---------------------------------------------------------------- swings (liquidity)
+float hh7 = ta.highest(high, 7)
+float ll7 = ta.lowest(low, 7)
+var float swH = na
+var float swL = na
+if bar_index >= 6 and high[3] == hh7
+    swH := high[3]
+if bar_index >= 6 and low[3] == ll7
+    swL := low[3]
+plot(showSw ? swH : na, "Swing high (buy-side liquidity)", color.new(color.red, 55), 1, plot.style_stepline)
+plot(showSw ? swL : na, "Swing low (sell-side liquidity)", color.new(color.green, 55), 1, plot.style_stepline)
+
+float a = ta.atr(atrLen)
+
+// ---------------------------------------------------------------- 20-day range (bias filter)
+var array<float> dH = array.new<float>()
+var array<float> dL = array.new<float>()
+var float curH = na
+var float curL = na
+if newDay
+    if not na(curH)
+        dH.push(curH)
+        dL.push(curL)
+        if dH.size() > 20
+            dH.shift()
+            dL.shift()
+    curH := high
+    curL := low
+else
+    curH := na(curH) ? high : math.max(curH, high)
+    curL := na(curL) ? low : math.min(curL, low)
+float eq = dH.size() >= 20 ? (dH.max() + dL.min()) / 2 : na
+bool allowL = biasMode == "None" or (not na(eq) and close < eq)
+bool allowS = biasMode == "None" or (not na(eq) and close > eq)
+
+// ---------------------------------------------------------------- state
+var int   stDir = 0          // sweep found, waiting for the FVG (1 long, -1 short)
+var int   stBar = na
+var int   stDay = na
+var int   stTime = na
+var float stExt = na
+var float stOpp = na
+var int   tradedDay = na
+
+var int    pDir = 0          // resting limit entry
+var float  pLim = na
+var float  pStop = na
+var float  pTgt = na         // na = fixed R from the fill
+var int    pLeft = 0
+var int    pExpTime = na
+var string pId = ""
+
+var int   tDir = 0           // simulated trade (for the chart only; the bot trades for real)
+var float tEntry = na
+var float tStop = na
+var float tTgt = na
+var int   tBar = na
+var line  lnE = na
+var line  lnS = na
+var line  lnT = na
+
+var int   nTr = 0
+var int   nWin = 0
+var float sumR = 0.0
+var string lastSent = ""
+
+colL = color.new(color.green, 0)
+colS = color.new(color.red, 0)
+
+closeTrade(float px, string why) =>
+    float r = tDir * (px - tEntry) / math.abs(tEntry - tStop)
+    label.new(bar_index, tDir == 1 ? high : low, str.format("{0}{1,number,0.0}R {2}", r >= 0 ? "+" : "", r, why), color = r >= 0 ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, style = tDir == 1 ? label.style_label_down : label.style_label_up, size = size.small)
+    r
+
+alertMsg() =>
+    string tgtPart = na(pTgt) ? ',"rr":' + str.tostring(rrIn) : ',"target":' + str.tostring(pTgt, "#.#####")
+    '{"secret":"' + secret + '","symbol":"' + botSym + '","action":"' + (pDir == 1 ? "buy" : "sell") + '","stop":' + str.tostring(pStop, "#.#####") + ',"entry":' + str.tostring(pLim, "#.#####") + tgtPart + ',"id":"' + pId + '","time":' + str.tostring(timenow, "#") + ',"source":"atlas_sb"}'
+
+// new trading day: drop anything left over
+if newDay
+    pDir := 0
+    stDir := 0
+
+// ---------------------------------------------------------------- 1) limit entry touched?
+if pDir != 0 and tDir == 0
+    bool touched = pDir == 1 ? low <= pLim : high >= pLim
+    if touched
+        float fillPx = pDir == 1 ? math.min(open, pLim) : math.max(open, pLim)
+        float tgt = na(pTgt) ? fillPx + pDir * rrIn * math.abs(fillPx - pStop) : pTgt
+        if pDir * (fillPx - pStop) > 0 and pDir * (tgt - fillPx) > 0
+            tDir := pDir
+            tEntry := fillPx
+            tStop := pStop
+            tTgt := tgt
+            tBar := bar_index
+            label.new(bar_index, pDir == 1 ? low : high, (pDir == 1 ? "BUY " : "SELL ") + str.tostring(fillPx, format.mintick), color = pDir == 1 ? colL : colS, textcolor = color.white, style = pDir == 1 ? label.style_label_up : label.style_label_down, size = size.small)
+            lnE := line.new(bar_index, fillPx, bar_index, fillPx, color = color.gray, width = 2)
+            lnS := line.new(bar_index, pStop, bar_index, pStop, color = colS, width = 2)
+            lnT := line.new(bar_index, tgt, bar_index, tgt, color = colL, width = 2)
+            if alertsOn and tfOk and secret != "" and barstate.isrealtime
+                alert(alertMsg(), alert.freq_once_per_bar)
+                lastSent := (pDir == 1 ? "BUY " : "SELL ") + str.format_time(timenow, "HH:mm", TZ)
+        pDir := 0
+    else
+        pLeft -= 1
+        if pLeft <= 0
+            pDir := 0
+            label.new(bar_index, high, "entry not reached", color = color.new(color.gray, 60), textcolor = color.white, style = label.style_label_down, size = size.tiny)
+
+// ---------------------------------------------------------------- 2) exits (stop first if both in one bar)
+if tDir != 0 and bar_index > tBar
+    line.set_x2(lnE, bar_index)
+    line.set_x2(lnS, bar_index)
+    line.set_x2(lnT, bar_index)
+float exitPx = na
+string exitWhy = ""
+if tDir != 0
+    if bar_index == tBar
+        if (tDir == 1 and low <= tStop) or (tDir == -1 and high >= tStop)
+            exitPx := tStop
+            exitWhy := "stop"
+    else if tDir == 1
+        if open <= tStop
+            exitPx := open
+            exitWhy := "stop (gap)"
+        else if low <= tStop
+            exitPx := tStop
+            exitWhy := "stop"
+        else if open >= tTgt
+            exitPx := open
+            exitWhy := "target (gap)"
+        else if high >= tTgt
+            exitPx := tTgt
+            exitWhy := "target"
+    else
+        if open >= tStop
+            exitPx := open
+            exitWhy := "stop (gap)"
+        else if high >= tStop
+            exitPx := tStop
+            exitWhy := "stop"
+        else if open <= tTgt
+            exitPx := open
+            exitWhy := "target (gap)"
+        else if low <= tTgt
+            exitPx := tTgt
+            exitWhy := "target"
+    if na(exitPx) and barstate.isconfirmed and tod + tfMin >= FLAT_BY
+        exitPx := close
+        exitWhy := "flat 15:50"
+    if not na(exitPx)
+        float r = closeTrade(exitPx, exitWhy)
+        nTr += 1
+        nWin += r > 0 ? 1 : 0
+        sumR += r
+        tDir := 0
+
+// ---------------------------------------------------------------- 3) setup detection on CLOSED bars
+if barstate.isconfirmed
+    if stDir != 0 and stDay != tday
+        stDir := 0
+    bool doneToday = not na(tradedDay) and tradedDay == tday
+    if not doneToday and not na(a)
+        if stDir == 0
+            if inSB
+                if allowL and not na(swL) and low < swL and swL < close
+                    stDir := 1
+                    stExt := low
+                    stOpp := swH
+                else if allowS and not na(swH) and high > swH and swH > close
+                    stDir := -1
+                    stExt := high
+                    stOpp := swL
+                if stDir != 0
+                    stBar := bar_index
+                    stDay := tday
+                    stTime := time
+                    label.new(bar_index, stDir == 1 ? low : high, "sweep", color = color.new(color.orange, 30), textcolor = color.white, style = stDir == 1 ? label.style_label_up : label.style_label_down, size = size.tiny)
+        else
+            stExt := stDir == 1 ? math.min(stExt, low) : math.max(stExt, high)
+            if bar_index - stBar > maxWait
+                stDir := 0
+            else
+                bool bodyOk = math.abs(close[1] - open[1]) >= dispAtr * a
+                float fLo = na
+                float fHi = na
+                if stDir == 1 and low > high[2] and close[1] > open[1] and bodyOk
+                    fLo := high[2]
+                    fHi := low
+                else if stDir == -1 and high < low[2] and close[1] < open[1] and bodyOk
+                    fLo := high
+                    fHi := low[2]
+                if not na(fLo)
+                    float lim = entryMode == "Gap edge" ? (stDir == 1 ? fHi : fLo) : (fLo + fHi) / 2
+                    float st = stExt - stDir * stopBuf * a
+                    float risk = math.abs(lim - st)
+                    bool valid = risk > 0 and stDir * (lim - st) > 0
+                    float tgt = na
+                    if valid and targetMode != "Fixed R"
+                        tgt := stOpp
+                        if na(tgt) or stDir * (tgt - lim) < minRR * risk
+                            valid := false
+                    if valid
+                        tradedDay := tday
+                        box.new(bar_index - 2, fHi, bar_index + expBars, fLo, border_color = color.new(stDir == 1 ? color.green : color.red, 40), bgcolor = color.new(stDir == 1 ? color.green : color.red, 85), text = "FVG", text_size = size.tiny, text_color = color.gray)
+                        float showT = na(tgt) ? lim + stDir * rrIn * risk : tgt
+                        line.new(bar_index, lim, bar_index + expBars, lim, color = color.gray, style = line.style_dashed)
+                        line.new(bar_index, st, bar_index + expBars, st, color = colS, style = line.style_dashed)
+                        line.new(bar_index, showT, bar_index + expBars, showT, color = colL, style = line.style_dashed)
+                        if tDir == 0
+                            pDir := stDir
+                            pLim := lim
+                            pStop := st
+                            pTgt := tgt
+                            pLeft := expBars
+                            pExpTime := time + expBars * tfMin * 60000
+                            pId := "SB-" + syminfo.ticker + "-" + str.tostring(time, "#")
+                    stDir := 0
+
+// ---------------------------------------------------------------- status + results table
+var table tb = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
+if showTable and barstate.islast
+    string status = pDir != 0 ? str.format("Limit {0} @ {1}  SL {2}  until {3}", pDir == 1 ? "BUY" : "SELL", str.tostring(pLim, format.mintick), str.tostring(pStop, format.mintick), str.format_time(pExpTime, "HH:mm", TZ)) : tDir != 0 ? str.format("In {0} from {1}  SL {2}  TP {3}", tDir == 1 ? "BUY" : "SELL", str.tostring(tEntry, format.mintick), str.tostring(tStop, format.mintick), str.tostring(tTgt, format.mintick)) : stDir != 0 ? "Sweep at " + str.format_time(stTime, "HH:mm", TZ) + ", waiting for a displacement FVG" : (not na(tradedDay) and tradedDay == tday) ? "Done for today (one setup per day)" : "Waiting for a sweep in the window"
+    string alertState = not alertsOn ? "OFF (input)" : not tfOk ? "OFF: use a 5-minute chart" : secret == "" ? "OFF: paste the webhook secret" : "ON -> " + botSym
+    table.cell(tb, 0, 0, "Atlas Silver Bullet", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 0, tfOk ? "5m" : "NOT 5m: rules were tested on 5m", text_color = tfOk ? color.lime : color.orange, text_size = size.small)
+    table.cell(tb, 0, 1, "Now", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 1, status, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "Bot alerts", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 2, alertState, text_color = alertState == "ON -> " + botSym ? color.lime : color.orange, text_size = size.small)
+    table.cell(tb, 0, 3, "Last sent", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 3, lastSent == "" ? "-" : lastSent, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 4, "Chart history", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 4, str.format("{0} trades, {1,number,0}% wins, {2,number,+0.0;-0.0}R total, {3,number,+0.00;-0.00}R avg", nTr, nTr > 0 ? 100.0 * nWin / nTr : 0.0, sumR, nTr > 0 ? sumR / nTr : 0.0), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 5, "", text_size = size.tiny)
+    table.cell(tb, 1, 5, "Before spread/fees. Demo only: an unproven lead.", text_color = color.gray, text_size = size.tiny)
