@@ -40,7 +40,9 @@ session:
   timezone: America/New_York
   open: "09:30"
   trade_start: "02:00"            # London killzone opens
-  last_entry: "11:00"             # no new entries (bot or manual) after this
+  last_entry: "12:30"             # no new entries (bot or manual) after this. 12:30 because a
+                                  # 10-11 Silver Bullet setup can confirm up to 60 min after the
+                                  # sweep and its entry rests 30 min more (same as the research)
   flat_by: "15:50"                # everything closed by this time, every day
   weekdays: [0, 1, 2, 3, 4]       # Mon-Fri
   overnight: false
@@ -88,18 +90,18 @@ instruments:
     commission_per_lot: 3.5       # VERIFY
 
 # Which strategy runs on which instrument. Params override strategy defaults.
-# liquidity_fvg = your model (daily fib discount bias -> liquidity sweep -> FVG retrace).
-# Status: UNPROVEN. Best research candidate, now being forward-tested on DEMO only.
-strategies:
-  - name: liquidity_fvg
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 7000            # ~25 trading days of 5m bars (needs 20-day range)
-    params:
-      bias: discount
-      liquidity: both
-      killzones: both
-      target: liquidity
+# Since 2026-11-05 the bot takes NO setups of its own. Entries come from the
+# TradingView indicator pine/atlas_silver_bullet.pine (10-11 AM NY Silver Bullet on
+# gold, the one lead from docs/RESULTS_ICT_2026-11-05.md) through the webhook below;
+# the bot sizes them, enforces every rule and attaches stop + target.
+# liquidity_fvg was switched off: it failed the fresh-data test (137 trades, -0.065R).
+# To switch it back on, restore this block:
+#  - name: liquidity_fvg
+#    instruments: [XAUUSD.R]
+#    timeframe: 5m
+#    history_bars: 7000
+#    params: {bias: discount, liquidity: both, killzones: both, target: liquidity}
+strategies: []
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
@@ -110,10 +112,18 @@ tradelocker:
   live_account_ids: []            # fill in only when going live
 
 webhook:
-  host: 0.0.0.0
-  port: 8787
   # TradingView alerts are executed through the same risk engine.
+  enabled: true                   # start the receiver with `atlas run` (no --webhook flag needed)
+  host: 0.0.0.0
+  port: 80                        # TradingView only sends to ports 80/443
   default_reward_risk: 2.0
+  symbol_aliases:                 # TradingView ticker -> GatesFX name
+    XAUUSD: XAUUSD.R
+    GOLD: XAUUSD.R
+  max_alert_age_seconds: 120      # ignore alerts that arrive late
+  max_entry_slip_r: 0.25          # skip if price is already >0.25R past the setup's entry
+  allowed_ips: []                 # optional: TradingView's IPs 52.89.214.238, 34.212.75.30,
+                                  # 54.218.53.128, 52.32.178.7 (secret is checked either way)
 
 monitoring:
   label: "Atlas $10k bot"            # prefix on every Telegram message
