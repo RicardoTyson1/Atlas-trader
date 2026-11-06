@@ -37,6 +37,7 @@ risk:
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
   off_hours_risk_pct: 1.0         # all other hours: 1% per trade (24/5 lost money in the replay)
+  min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
 
 session:
   timezone: America/New_York
@@ -117,10 +118,13 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "00:00-23:59"          # 5m entries at all hours (5% risk 08-11 NY, 1% outside). Outside 08-11
-                                    # open trades trail on 1-minute candles (runner._manage_exit).
-                                    # 1m entries off-hours were tried 2026-11-05 and dropped: replay
-                                    # 6,302 trades, -0.07R, -$9,971 at 1% (5m off-hours: -$336).
+      hours: "08:00-11:00"          # entries 08-11 NY only. no_chase_study (2026-11-06, 3.7 years 5m):
+                                    # off-hours entries lost -261R (2023-24) and -29R (2025-26).
+                                    # Was 00:00-23:59. Open trades still trail on 1m candles outside 08-11.
+      max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
+      max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
+      run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
+                                    # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).

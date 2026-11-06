@@ -241,6 +241,10 @@ class Runner:
             target = price + side * (rr or 2.0) * abs(price - stop)
         if side * (target - price) <= 0:
             return "skipped:price already past the target"
+        reward_r = side * (target - price) / abs(price - stop)
+        if reward_r < self.cfg.risk.min_target_r:
+            return (f"skipped:target pays only {reward_r:.2f}R at the fill price "
+                    f"(min {self.cfg.risk.min_target_r:.2f}R)")
         inst = self.cfg.instrument(sym)
         qty = self.rm.size(price, stop, inst, equity, when=local.to_pydatetime() if hasattr(local, "to_pydatetime") else local)
         if qty <= 0:

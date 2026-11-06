@@ -56,6 +56,7 @@ class RiskSettings:
     guardian_stop_grace_seconds: float = 30.0 # time you get to place your own stop first
     core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
     off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
+    min_target_r: float = 1.0                 # skip a trade whose target pays < this x risk AT THE FILL PRICE
 
 
 @dataclass

@@ -240,3 +240,19 @@ def test_guardian_closes_if_already_past_max_loss(cfg):
     runner.step(t + pd.Timedelta(seconds=40))
     assert not broker.positions()
     assert any("past the max loss" in m for m in runner.notify.messages)
+
+
+def test_rejects_trade_whose_target_pays_less_than_min_r(cfg):
+    """2026-11-05 20:36 NY: a TradingView alert filled at a price where the target paid
+    $2.78 against an $18 stop (0.15R). Such trades must be skipped."""
+    cfg.strategies = []
+    cfg.risk.min_target_r = 1.0
+    base, broker, runner, t = _guard_setup(cfg)
+    bid, ask = broker.quote("NAS100")
+    res = runner._try_enter("NAS100", 1, ask - 18.0, ask + 2.78, None,
+                            t.tz_convert("America/New_York"), broker.account().equity, 0, "test")
+    assert res.startswith("skipped:target pays only")
+    assert not broker.positions()
+    ok = runner._try_enter("NAS100", 1, ask - 10.0, ask + 20.0, None,
+                           t.tz_convert("America/New_York"), broker.account().equity, 0, "test")
+    assert ok == "entered"

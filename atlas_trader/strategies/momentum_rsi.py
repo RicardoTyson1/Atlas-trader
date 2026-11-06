@@ -9,6 +9,10 @@
   TARGET : `tp: levels` = take profit at the nearest FVG 50% / resting liquidity / major S/R
            level paying >= `tp_min_r` x risk (atlas_trader/targets.py); none in reach = no
            trade. `tp: none` = no fixed target (`reward_risk` 0) and ride the trail.
+  NO CHASE (optional, off by default): skip the signal when the aggressive candle is an
+           exhaustion spike (range > `max_candle_atr` x ATR) or when price has already run
+           more than `max_run_atr` x ATR from the extreme of the last `run_bars` candles
+           (lowest low for a long, highest high for a short). 0 = off.
   STAY IN: no fixed target by default (`reward_risk` 0). Candle trailing stop from
            `trail_start_r` x risk; on another aggressive candle in our favor (body >=
            `spike_atr` x ATR) the stop is pulled to the middle of that candle. The stop never
@@ -48,6 +52,9 @@ class MomentumRSI(Strategy):
         "tp_sr_days": 10,
         "tp_front_atr": 0.1,
         "hours": "08:00-11:00",
+        "max_candle_atr": 0.0,     # no-chase: skip spike candles bigger than this x ATR (0 = off)
+        "max_run_atr": 0.0,        # no-chase: skip if price already ran this x ATR (0 = off)
+        "run_bars": 12,            # ... measured over this many candles (12 x 5m = 1 hour)
     }
 
     def generate(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -77,6 +84,16 @@ class MomentumRSI(Strategy):
         if p["trend_filter"]:
             up &= c > e
             dn &= c < e
+        if p["max_candle_atr"] > 0:
+            calm = rng <= p["max_candle_atr"] * a
+            up &= calm
+            dn &= calm
+        if p["max_run_atr"] > 0:
+            nb = int(p["run_bars"])
+            low_n = pd.Series(l).rolling(nb, min_periods=1).min().to_numpy()
+            high_n = pd.Series(h).rolling(nb, min_periods=1).max().to_numpy()
+            up &= (c - low_n) <= p["max_run_atr"] * a
+            dn &= (high_n - c) <= p["max_run_atr"] * a
         side = np.where(up & in_hours, 1, np.where(dn & in_hours, -1, 0))
         stop = np.where(side == 1, l - p["stop_buffer_atr"] * a, np.where(side == -1, h + p["stop_buffer_atr"] * a, np.nan))
         risk = np.abs(c - stop)
