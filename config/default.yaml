@@ -101,30 +101,31 @@ instruments:
     commission_per_lot: 3.5       # VERIFY
 
 # Which strategy runs on which instrument. Params override strategy defaults.
-# reversal_trail (fast move + extreme RSI -> change of character, half-move target) was removed
-# from the live bot on 2026-11-05 at Ricardo's request; the code stays in strategies/ for research.
-# Weak/strong ranking: research/shootout.py; drop whatever the shoot-out and demo show is weak.
-strategies:
-  # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
-  # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
-  # Status: UNPROVEN. Demo forward test (one position at a time).
-  - name: momentum_rsi
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-    params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
-      disp_atr: 1.0
-      trend_filter: true
-      trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
-      trail_buf_atr: 0.3
-      spike_atr: 2.0
-      hours: "08:00-11:00"          # entries 08-11 NY only. no_chase_study (2026-11-06, 3.7 years 5m):
-                                    # off-hours entries lost -261R (2023-24) and -29R (2025-26).
-                                    # Was 00:00-23:59. Open trades still trail on 1m candles outside 08-11.
-      max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
-      max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
-      run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
-                                    # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
+# Every strategy that failed testing was deleted on 2026-11-05 (Ricardo); results in docs/RESULTS_*.md.
+# PAUSED 2026-11-05 (Ricardo): no bot-generated entries until a new strategy passes the backtest.
+# TradingView alerts (webhook below) still trade, with the same risk rules.
+# To resume momentum_rsi, delete the `strategies: []` line and un-comment the block below.
+strategies: []
+# # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
+# # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
+# # Status: UNPROVEN. Demo forward test (one position at a time).
+# - name: momentum_rsi
+#   instruments: [XAUUSD.R]
+#   timeframe: 5m
+#   history_bars: 600
+#   params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
+#     disp_atr: 1.0
+#     trend_filter: true
+#     trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
+#     trail_buf_atr: 0.3
+#     spike_atr: 2.0
+#     hours: "08:00-11:00"          # entries 08-11 NY only. no_chase_study (2026-11-06, 3.7 years 5m):
+#                                   # off-hours entries lost -261R (2023-24) and -29R (2025-26).
+#                                   # Was 00:00-23:59. Open trades still trail on 1m candles outside 08-11.
+#     max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
+#     max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
+#     run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
+#                                   # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
