@@ -6,8 +6,15 @@ was deleted on 2026-11-05 (Ricardo); its results stay in docs/RESULTS_*.md and g
 """
 from .base import Strategy
 from .momentum_rsi import MomentumRSI
+from .bb_reversion import BBReversion
+from .st_confluence import STConfluence
+from .smc_ob import SMCOrderBlock
 
-REGISTRY: dict[str, type[Strategy]] = {cls.name: cls for cls in (MomentumRSI,)}
+# bb_reversion / st_confluence / smc_ob: added 2026-11-06 for testing (research/archetypes_study.py);
+# only the ones that pass go into config/default.yaml.
+REGISTRY: dict[str, type[Strategy]] = {
+    cls.name: cls for cls in (MomentumRSI, BBReversion, STConfluence, SMCOrderBlock)
+}
 
 
 def build_strategy(name: str, session, params: dict | None = None) -> Strategy:
