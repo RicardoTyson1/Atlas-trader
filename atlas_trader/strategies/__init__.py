@@ -9,11 +9,13 @@ from .momentum_rsi import MomentumRSI
 from .bb_reversion import BBReversion
 from .st_confluence import STConfluence
 from .smc_ob import SMCOrderBlock
+from .scalp import Scalp
 
 # bb_reversion / st_confluence / smc_ob: added 2026-11-06 for testing (research/archetypes_study.py);
 # only the ones that pass go into config/default.yaml.
+# scalp: 60-second scalper under test (research/scalp_study.py), not on the live bot.
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (MomentumRSI, BBReversion, STConfluence, SMCOrderBlock)
+    cls.name: cls for cls in (MomentumRSI, BBReversion, STConfluence, SMCOrderBlock, Scalp)
 }
 
 
