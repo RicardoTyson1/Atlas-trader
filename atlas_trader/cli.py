@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> None:
 
     b = sub.add_parser("backtest", help="backtest one strategy")
     data_args(b)
-    b.add_argument("--strategy", default="orb", choices=sorted(REGISTRY))
+    b.add_argument("--strategy", default="momentum_rsi", choices=sorted(REGISTRY))
     b.add_argument("--param", action="append", help="override, e.g. --param reward_risk=1.5")
     b.add_argument("--oos", type=float, help="fraction of days held out as out-of-sample, e.g. 0.3")
     b.add_argument("--mc", type=int, nargs="?", const=5000, help="Monte Carlo prop challenge paths")
@@ -291,7 +291,7 @@ def main(argv: list[str] | None = None) -> None:
 
     s = sub.add_parser("sweep", help="parameter sweep scored out-of-sample")
     data_args(s)
-    s.add_argument("--strategy", default="orb", choices=sorted(REGISTRY))
+    s.add_argument("--strategy", default="momentum_rsi", choices=sorted(REGISTRY))
     s.add_argument("--grid", required=True, help='e.g. "reward_risk=1.5,2,3;range_minutes=5,15,30"')
     s.add_argument("--oos", type=float, default=0.3)
     s.set_defaults(fn=cmd_sweep)
