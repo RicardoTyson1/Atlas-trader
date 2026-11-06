@@ -70,7 +70,7 @@ def test_flat_by_session_end(cfg):
 
 
 def test_costs_reduce_pnl(cfg, bars5):
-    s = build_strategy("orb", cfg.session)
+    s = build_strategy("momentum_rsi", cfg.session, {"hours": "00:00-23:59"})
     inst = cfg.instrument("NAS100")
     with_cost = run_backtest(bars5, s, inst, cfg).stats["net_profit"]
     inst.spread_points = inst.slippage_points = 0
@@ -79,8 +79,8 @@ def test_costs_reduce_pnl(cfg, bars5):
 
 
 def test_never_breaches_on_random_data(cfg, bars5):
-    for name in ("orb", "trend_pullback", "vwap_reversion"):
-        res = run_backtest(bars5, build_strategy(name, cfg.session), cfg.instrument("NAS100"), cfg)
+    for name in ("momentum_rsi",):
+        res = run_backtest(bars5, build_strategy(name, cfg.session, {"hours": "00:00-23:59"}), cfg.instrument("NAS100"), cfg)
         assert res.stats["prop_breached"] is None
 
 

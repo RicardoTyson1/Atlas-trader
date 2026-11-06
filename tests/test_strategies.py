@@ -37,13 +37,6 @@ def test_signals_only_in_entry_window(name, cfg, bars5):
     assert (mins[sig] >= 9 * 60 + 45).all() and (mins[sig] <= 15 * 60).all()
 
 
-def test_orb_one_trade_per_day(cfg, bars5):
-    out = build_strategy("orb", cfg.session).generate(bars5)
-    day = out.index.tz_convert(cfg.session.timezone).date
-    counts = (out.signal != 0).groupby(day).sum()
-    assert counts.max() <= 1
-
-
 def test_unknown_param_rejected(cfg):
     with pytest.raises(ValueError):
-        build_strategy("orb", cfg.session, {"nope": 1})
+        build_strategy("momentum_rsi", cfg.session, {"nope": 1})

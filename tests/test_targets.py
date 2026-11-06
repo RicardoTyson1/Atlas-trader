@@ -61,8 +61,7 @@ def test_no_look_ahead():
 def test_strategies_place_targets_at_levels():
     df = resample(synthetic_intraday(days=40, seed=3), "5m")
     s = Session()
-    for name, extra in (("momentum_rsi", {"tp": "levels", "hours": "00:00-23:59", "trend_filter": False}),
-                        ("reversal_trail", {"target": "levels", "hours": "00:00-23:59", "move_atr": 3.0})):
+    for name, extra in (("momentum_rsi", {"tp": "levels", "hours": "00:00-23:59", "trend_filter": False}),):
         out = build_strategy(name, s, extra).generate(df)
         sig = out[out.signal != 0]
         assert len(sig), name

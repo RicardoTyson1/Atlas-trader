@@ -11,7 +11,7 @@ BASE = {
     "risk": {"risk_per_trade_pct": 0.5, "max_trades_per_day": 3, "max_consecutive_losses": 3},
     "instruments": {"NAS100": {"value_per_point": 1.0, "min_lot": 0.1, "lot_step": 0.1,
                                "spread_points": 1.0, "slippage_points": 0.5}},
-    "strategies": [{"name": "orb", "instruments": ["NAS100"], "timeframe": "5m"}],
+    "strategies": [{"name": "momentum_rsi", "instruments": ["NAS100"], "timeframe": "5m"}],
 }
 
 

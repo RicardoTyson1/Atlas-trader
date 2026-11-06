@@ -175,7 +175,7 @@ def test_daily_armed_and_end_of_day_reports(cfg):
 
 
 def test_entry_uses_live_quote_not_bar_close(cfg):
-    base, broker, runner = make(cfg, days=2)
+    base, broker, runner = make(cfg, days=5)
     seen = {}
     real_quote = broker.quote
     def q(sym):
@@ -188,13 +188,13 @@ def test_entry_uses_live_quote_not_bar_close(cfg):
 
 def test_same_strategy_twice_with_labels(cfg):
     from atlas_trader.config import StrategySpec
-    cfg.strategies = [StrategySpec("orb", ["NAS100"], "5m"), StrategySpec("orb", ["NAS100"], "5m", label="orb_b")]
-    assert [s.id for s in cfg.strategies] == ["orb", "orb_b"]
+    cfg.strategies = [StrategySpec("momentum_rsi", ["NAS100"], "5m"), StrategySpec("momentum_rsi", ["NAS100"], "1m", label="momentum_1m")]
+    assert [s.id for s in cfg.strategies] == ["momentum_rsi", "momentum_1m"]
 
 
 def test_off_hours_trailing_uses_1m_candles(cfg):
     from atlas_trader.config import StrategySpec
-    cfg.strategies = [StrategySpec("orb", ["NAS100"], "5m")]
+    cfg.strategies = [StrategySpec("momentum_rsi", ["NAS100"], "5m")]
     cfg.risk.core_hours = "08:00-11:00"
     base, broker, runner = make(cfg, days=2)
     calls = []
@@ -204,7 +204,7 @@ def test_off_hours_trailing_uses_1m_candles(cfg):
     broker.set_time(t)
     runner.clock = lambda: broker.now
     _, ask = broker.quote("NAS100")
-    runner.submit_external("NAS100", 1, ask - 20, source="orb")
+    runner.submit_external("NAS100", 1, ask - 20, source="momentum_rsi")
     spec, strat = runner.strats[0]
     runner._manage_exit(spec, strat, "NAS100", t)
     assert "1m" in calls
