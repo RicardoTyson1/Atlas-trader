@@ -103,9 +103,33 @@ instruments:
 # Which strategy runs on which instrument. Params override strategy defaults.
 # Every strategy that failed testing was deleted on 2026-11-05 (Ricardo); results in docs/RESULTS_*.md.
 # PAUSED 2026-11-05 (Ricardo): no bot-generated entries until a new strategy passes the backtest.
-# TradingView alerts (webhook below) still trade, with the same risk rules.
-# To resume momentum_rsi, delete the `strategies: []` line and un-comment the block below.
-strategies: []
+# 2026-11-06: two new archetypes PASSED research/archetypes_study.py (positive in both halves of
+# 3.7 years, >= 100 trades; NOT strong, t < 2.5) and resume bot entries on the demo:
+# docs/RESULTS_ARCHETYPES_2026-11-06.md. TradingView alerts (webhook below) still trade too.
+# To resume momentum_rsi as well, un-comment its block below.
+strategies:
+  # smc_ob = H4 EMA-50 bias -> 5m liquidity sweep (24 candles) -> displacement FVG -> order-block
+  # retest; stop beyond the sweep; no fixed target, candle trailing from +1R.
+  # Study: n=270, 37% wins, +0.209R/trade, t=1.56 (A +0.066, B +0.336).
+  - name: smc_ob
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 6000              # ~3 weeks, so the H4 EMA-50 is warmed up
+    params:
+      sweep_bars: 24
+      reward_risk: 0.0
+      hours: "08:00-11:00"
+  # st_confluence = SuperTrend(10,3) trend + MACD agrees + above-average volume, pullback to the
+  # SuperTrend line -> entry; stop beyond the line; trail from +1R; SuperTrend flip exits.
+  # Study: n=113, 42.5% wins, +0.054R/trade, t=0.46 (A +0.069, B +0.038) - a marginal pass.
+  - name: st_confluence
+    instruments: [XAUUSD.R]
+    timeframe: 15m
+    history_bars: 600
+    params:
+      st_mult: 3.0
+      vol_mult: 0.0
+      hours: "08:00-11:00"
 # # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
 # # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
 # # Status: UNPROVEN. Demo forward test (one position at a time).
