@@ -39,3 +39,44 @@ def session_vwap(df: pd.DataFrame, day: pd.Series) -> pd.Series:
     pv = (tp * vol).groupby(day.values).cumsum()
     vv = vol.groupby(day.values).cumsum()
     return pv / vv
+
+
+def sma(s: pd.Series, n: int) -> pd.Series:
+    return s.rolling(n, min_periods=n).mean()
+
+
+def bollinger(close: pd.Series, n: int = 20, k: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """(middle, upper, lower). Uses the population std of the last n closes."""
+    mid = sma(close, n)
+    sd = close.rolling(n, min_periods=n).std(ddof=0)
+    return mid, mid + k * sd, mid - k * sd
+
+
+def macd_hist(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.Series:
+    line = ema(close, fast) - ema(close, slow)
+    return line - ema(line, signal)
+
+
+def supertrend(df: pd.DataFrame, n: int = 10, mult: float = 3.0) -> tuple[pd.Series, pd.Series]:
+    """Classic SuperTrend. Returns (line, direction) with direction +1 (up) / -1 (down).
+    Bar i uses only bars <= i."""
+    h, l, c = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+    a = atr(df, n).to_numpy()
+    hl2 = (h + l) / 2
+    up_b, dn_b = hl2 - mult * a, hl2 + mult * a
+    line = np.full(len(df), np.nan)
+    d = np.zeros(len(df))
+    fu, fd = up_b.copy(), dn_b.copy()
+    for i in range(len(df)):
+        if np.isnan(a[i]):
+            continue
+        if i > 0 and not np.isnan(fu[i - 1]):
+            fu[i] = max(up_b[i], fu[i - 1]) if c[i - 1] > fu[i - 1] else up_b[i]
+            fd[i] = min(dn_b[i], fd[i - 1]) if c[i - 1] < fd[i - 1] else dn_b[i]
+        prev = d[i - 1] if i > 0 else 0
+        if prev >= 0:
+            d[i] = -1 if c[i] < fu[i] else 1
+        else:
+            d[i] = 1 if c[i] > fd[i] else -1
+        line[i] = fu[i] if d[i] == 1 else fd[i]
+    return pd.Series(line, index=df.index), pd.Series(d, index=df.index)
