@@ -1,21 +1,13 @@
-from .base import Strategy
-from .orb import OpeningRangeBreakout
-from .trend_pullback import TrendPullback
-from .vwap_reversion import VwapReversion
-from .session_breakout import SessionBreakout
-from .donchian_trend import DonchianTrend
-from .time_drift import TimeDrift
-from .liquidity_fvg import LiquidityFVG
-from .silver_bullet import SilverBullet
-from .break_retest import BreakRetest
-from .reversal_trail import ReversalTrail
-from .momentum_rsi import MomentumRSI
-from .trend_break import TrendBreakRetest
-from .zone_retest import ZoneRetest
+"""Strategies the bot can run.
 
-REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift, LiquidityFVG, SilverBullet, BreakRetest, ReversalTrail, MomentumRSI, TrendBreakRetest, ZoneRetest)
-}
+Only momentum_rsi is kept: it is the one model that was profitable in both halves of the
+replay (+0.23R/trade, research results in docs/). Every other model that failed testing
+was deleted on 2026-11-05 (Ricardo); its results stay in docs/RESULTS_*.md and git history.
+"""
+from .base import Strategy
+from .momentum_rsi import MomentumRSI
+
+REGISTRY: dict[str, type[Strategy]] = {cls.name: cls for cls in (MomentumRSI,)}
 
 
 def build_strategy(name: str, session, params: dict | None = None) -> Strategy:
