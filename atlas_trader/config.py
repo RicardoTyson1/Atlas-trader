@@ -54,6 +54,8 @@ class RiskSettings:
     guardian: bool = True                     # police ALL positions on the account, incl. manual ones
     guardian_auto_stop: bool = False          # no stop on a trade: attach one at max risk instead of closing
     guardian_stop_grace_seconds: float = 30.0 # time you get to place your own stop first
+    guardian_allow_adding: bool = False       # manual add-ons to an open trade are allowed while the combined
+                                              # size on that symbol stays within max_lots (each piece needs a stop)
     core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
     off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
     min_target_r: float = 1.0                 # skip a trade whose target pays < this x risk AT THE FILL PRICE
@@ -97,6 +99,7 @@ class Instrument:
     spread_points: float = 0.0
     slippage_points: float = 0.0
     commission_per_lot: float = 0.0
+    always_open: bool = False      # 24/7 market (crypto): no weekday / daily-break rules for this symbol
 
 
 @dataclass

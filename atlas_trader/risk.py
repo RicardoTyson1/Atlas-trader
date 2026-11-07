@@ -165,17 +165,20 @@ class RiskManager:
         self.s.hard_halt = None
 
     # ------------------------------------------------------------ permissions
-    def check_entry(self, ts_local: datetime, open_positions: int = 0) -> tuple[bool, str]:
+    def check_entry(self, ts_local: datetime, open_positions: int = 0,
+                    always_open: bool = False) -> tuple[bool, str]:
         if self.s.hard_halt:
             return False, f"hard halt: {self.s.hard_halt}"
         if self.s.day_halt:
             return False, f"day halt: {self.s.day_halt}"
         if self.prop.phase == "evaluation" and self.s.target_hit_on:
             return False, "profit target already reached; stop trading the evaluation"
-        if ts_local.weekday() not in self.session.weekdays:
-            return False, "not a trading weekday"
         m = ts_local.hour * 60 + ts_local.minute
-        if self.session.reopen is not None:
+        if always_open:
+            pass                                   # 24/7 market: weekends and gold's daily break don't apply
+        elif ts_local.weekday() not in self.session.weekdays:
+            return False, "not a trading weekday"
+        elif self.session.reopen is not None:
             if self.session.in_break(m) or (_mins(self.session.last_entry) < m < _mins(self.session.flat_by)):
                 return False, "outside entry window (daily break)"
         elif m < _mins(self.session.trade_start) or m > _mins(self.session.last_entry):

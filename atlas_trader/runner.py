@@ -149,8 +149,12 @@ class Runner:
                 self._detect_closed(positions, acct.balance, local)
 
         flat_reason = self.rm.must_flatten(local)
+        if flat_reason == "end of session":
+            # 24/7 symbols (e.g. BTCUSD) are not closed at gold's daily break
+            if not [p for p in positions if not self._always_open(p.symbol)]:
+                flat_reason = None
         if flat_reason and positions:
-            self._flatten(flat_reason)
+            self._flatten(flat_reason, keep_always_open=flat_reason == "end of session")
             actions.append(f"flatten:{flat_reason}")
             positions = self.broker.positions()
             acct = self.broker.account()
@@ -227,7 +231,8 @@ class Runner:
                    max_bars: float | None = None, trail: tuple[float, float] | None = None,
                    spike: tuple[float, float, int] | None = None, worst_price: float | None = None,
                    tp_note: str | None = None) -> str:
-        ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open)
+        ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open,
+                                      always_open=self._always_open(sym))
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
             return f"skipped:{why}"
@@ -392,7 +397,10 @@ class Runner:
                 else:
                     added = self._attach_stop(p, balance, local)
                     if added is None:
-                        to_close[p.id] = "no stop-loss and it is already past the max loss"
+                        to_close[p.id] = ("no stop-loss and it is already past the max loss"
+                                          if p.symbol in self.cfg.instruments else
+                                          f"no stop-loss, and {p.symbol} is not set up in the config "
+                                          f"so no automatic stop can be placed")
                     else:
                         actions.append("guardian:stop added")
                         self.notify.send(f"GUARDIAN added a stop to {p.symbol} {p.qty} lots at {added:.2f} "
@@ -407,25 +415,42 @@ class Runner:
         by_symbol: dict[str, list] = {}
         for p in positions:
             by_symbol.setdefault(p.symbol, []).append(p)
+        allow_add = self.cfg.risk.guardian_allow_adding
+        add_ons: set[str] = set()                     # accepted add-ons (not the first piece on a symbol)
         for ps in by_symbol.values():
             ps = sorted(ps, key=lambda x: (x.id not in self.tracked, x.opened or pd.Timestamp.max.tz_localize("UTC")))
+            if not allow_add:
+                for extra in ps[1:]:
+                    to_close.setdefault(extra.id, "adding to an open position")
+                continue
+            ps = [x for x in ps if x.id not in to_close]   # pieces already being closed don't count
+            total = ps[0].qty if ps else 0.0
             for extra in ps[1:]:
-                to_close.setdefault(extra.id, "adding to an open position")
+                if total + extra.qty > self.cfg.risk.max_lots + 1e-9:
+                    to_close.setdefault(extra.id, f"add-on would make {total + extra.qty:g} lots "
+                                                  f"> max {self.cfg.risk.max_lots} lots")
+                else:
+                    total += extra.qty
+                    add_ons.add(extra.id)
         for p in positions:
             if p.id in self.tracked or p.id in to_close:
                 continue
-            others = len([q for q in positions if q.id != p.id and q.id not in to_close])
+            live = [q for q in positions if q.id != p.id and q.id not in to_close]
+            add_on = p.id in add_ons
+            # an allowed add-on is part of the trade already open, not a new position or a new trade
+            others = len({q.symbol for q in live if q.symbol != p.symbol}) if allow_add else len(live)
             opened_local = (p.opened.tz_convert(self.cfg.session.tz).to_pydatetime()
                             if p.opened is not None else local.to_pydatetime())
-            ok, why = self.rm.check_entry(opened_local, others)
+            ok, why = self.rm.check_entry(opened_local, others, always_open=self._always_open(p.symbol))
             if ok:
-                self.rm.record_entry()
+                if not add_on:
+                    self.rm.record_entry()
                 fee = 2 * self.cfg.instruments.get(p.symbol, None).commission_per_lot * p.qty \
                     if p.symbol in self.cfg.instruments else 0.0
                 self.tracked[p.id] = {"symbol": p.symbol, "bot": False, "bal_before": balance + fee,
                                       "entry_time": str(p.opened or pd.Timestamp.now(tz="UTC")),
                                       "max_bars": None, "strategy": None}
-                self.notify.send(f"Manual trade accepted: {p.symbol} {p.qty} lots "
+                self.notify.send(f"Manual {'add-on' if add_on else 'trade'} accepted: {p.symbol} {p.qty} lots "
                                  f"({self.rm.s.trades_today}/{self.cfg.risk.max_trades_per_day} trades today).")
             else:
                 to_close[p.id] = f"manual trade blocked: {why}"
@@ -487,8 +512,13 @@ class Runner:
             return False
         return True
 
-    def _flatten(self, reason: str) -> bool:
-        ids = [p.id for p in self.broker.positions()]
+    def _always_open(self, symbol: str) -> bool:
+        inst = self.cfg.instruments.get(symbol)
+        return bool(inst and inst.always_open)
+
+    def _flatten(self, reason: str, keep_always_open: bool = False) -> bool:
+        ids = [p.id for p in self.broker.positions()
+               if not (keep_always_open and self._always_open(p.symbol))]
         if not ids:
             return True
         ok = self._close_verified(ids)
