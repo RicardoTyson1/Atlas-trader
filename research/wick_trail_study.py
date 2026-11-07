@@ -78,6 +78,7 @@ MODELS = {
                            params=dict(move_atr=5.0, rsi_level=25, target="half_move", spike_atr=0.0,
                                        trail_start_r=1.0, trail_buf_atr=0.3, hours=HOURS)),
 }
+VARIANTS: list | None = None     # None = the pre-registered grid above; else [(name, {WickTrail kwargs}), ...]
 DD_TOLERANCE = 1.20
 STRONG_N, STRONG_T = 100, 2.5
 DATA: dict = {}
@@ -200,8 +201,8 @@ def baseline_manager(B: Bars, t) -> callable:
     return manage
 
 
-def wick_manager(B: Bars, t, buf: float, be: bool, be_offset: float) -> callable:
-    wt = WickTrail(t.side, t.entry, t.init_stop, buf, breakeven=be, be_offset=be_offset)
+def wick_manager(B: Bars, t, buf: float, be: bool, be_offset: float, **opts) -> callable:
+    wt = WickTrail(t.side, t.entry, t.init_stop, buf, breakeven=be, be_offset=be_offset, **opts)
 
     def manage(i, stop):
         if not np.isnan(B.atr[i]):
@@ -256,15 +257,18 @@ def run_job(job):
         B = B_sig if tf == spec["sig_tf"] else Bars(DATA[(tf, part)], cfg, inst, parent=sig_df, exit_sig=exit_sig)
         i0v = np.searchsorted(B.idx.values, trades.entry_time.values)
         out.setdefault("entry_bar_mismatch", {})[tf] = int((B.idx.values[np.minimum(i0v, B.n - 1)] != trades.entry_time.values).sum())
-        for buf in BUFFERS:
-            for be in (False, True):
-                name = f"wick {tf} buf {buf:.2f}" + (" +BE" if be else "")
-                rs = []
-                for t, i0 in zip(trades.itertuples(), i0v):
-                    fill, _, _ = simulate(B, int(i0), t.side, t.entry, t.init_stop, t.target,
-                                          wick_manager(B, t, buf, be, be_offset), half_cost)
-                    rs.append(net_r(t.side, t.entry, t.init_stop, fill, inst))
-                out["per_trade"][name] = rs
+        grid = ([(f"wick {tf} buf {buf:.2f}" + (" +BE" if be else ""), dict(buffer_atr=buf, breakeven=be))
+                 for buf in BUFFERS for be in (False, True)] if VARIANTS is None
+                else [(f"wick {tf} {name}", kw) for name, kw in VARIANTS])
+        for name, kw in grid:
+            kw = dict(kw)
+            buf, be = kw.pop("buffer_atr"), kw.pop("breakeven", False)
+            rs = []
+            for t, i0 in zip(trades.itertuples(), i0v):
+                fill, _, _ = simulate(B, int(i0), t.side, t.entry, t.init_stop, t.target,
+                                      wick_manager(B, t, buf, be, be_offset, **kw), half_cost)
+                rs.append(net_r(t.side, t.entry, t.init_stop, fill, inst))
+            out["per_trade"][name] = rs
     return out
 
 
@@ -301,7 +305,7 @@ def main(path: str) -> None:
     run_study("wick_trail")
 
 
-def run_study(tag: str) -> None:
+def run_study(tag: str) -> dict:
     """Run every model in MODELS on DATA (both halves) and write research/<tag>_results.csv and
     research/<tag>_trades.csv, then print the tables and the verdict."""
     jobs = [(m, p) for m in MODELS for p in ("A", "B")]
@@ -318,7 +322,7 @@ def run_study(tag: str) -> None:
 
     rows, trades_out = [], []
     pd.set_option("display.width", 250)
-    verdicts = []
+    verdicts, decisions = [], {}
     for model in MODELS:
         A, Bh = got[(model, "A")], got[(model, "B")]
         print(f"\n{model}: n A={A['n']} B={Bh['n']} | baseline replay max |dR| A={A.get('replay_max_err')} "
@@ -352,6 +356,8 @@ def run_study(tag: str) -> None:
         dd_ok = cand.B_maxDD <= DD_TOLERANCE * base_row.B_maxDD + 1e-12
         passed = beats and pos and dd_ok
         strong = passed and cand.B_n >= STRONG_N and cand.B_t >= STRONG_T
+        decisions[model] = {"variant": cand.variant, "passed": bool(passed), "strong": bool(strong),
+                            "table": g}
         verdicts.append(
             f"{model}: picked on A = '{cand.variant}' (A {cand.A_totalR:+.1f}R vs baseline {base_row.A_totalR:+.1f}R). "
             f"Half B: {cand.B_totalR:+.1f}R vs baseline {base_row.B_totalR:+.1f}R [{'ok' if beats else 'FAIL'}], "
@@ -362,6 +368,7 @@ def run_study(tag: str) -> None:
     print("\nVERDICT")
     for v in verdicts:
         print("  " + v)
+    return decisions
 
 
 if __name__ == "__main__":
