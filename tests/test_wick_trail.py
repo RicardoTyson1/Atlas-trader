@@ -151,3 +151,33 @@ def test_no_look_ahead(seed):
         for i in range(k + 1):
             wt.update(o2[i], h2[i], l2[i], c2[i], 0.5)
         assert wt.stop == stops_full[k]
+
+
+def test_option_confirm_on_close():
+    """confirm_on='close': a strong candle closing above S's close (but below S's high) confirms."""
+    seq = LONG_SETUP
+    conf = (100.4, 101.2, 100.35, 101.15)          # closes 101.15: above S close 101.1, below S high 101.2
+    strict = WickTrail(1, 100.0, 99.0, buffer_atr=0.25)
+    loose = WickTrail(1, 100.0, 99.0, buffer_atr=0.25, confirm_on="close")
+    feed(strict, seq)
+    feed(loose, seq)
+    assert strict.update(*conf, ATR) is None
+    assert loose.update(*conf, ATR) == pytest.approx(100.3 - 0.25)
+
+
+def test_option_no_dip_required():
+    seq = [(100.0, 101.2, 99.9, 101.1),            # S
+           (101.1, 101.15, 100.95, 101.0)]         # pause, no lower low
+    conf = (101.0, 101.9, 100.98, 101.8)
+    strict = WickTrail(1, 100.0, 99.0, buffer_atr=0.1)
+    loose = WickTrail(1, 100.0, 99.0, buffer_atr=0.1, require_dip=False)
+    feed(strict, seq)
+    feed(loose, seq)
+    assert strict.update(*conf, ATR) is None
+    assert loose.update(*conf, ATR) == pytest.approx(100.95 - 0.1)
+
+
+def test_option_later_activation():
+    wt = WickTrail(1, 100.0, 99.0, buffer_atr=0.1, activate_r=2.0)
+    feed(wt, LONG_SETUP + [(100.4, 101.6, 100.35, 101.5)])     # reaches 1.6R only
+    assert wt.stop == 99.0 and not wt.active
