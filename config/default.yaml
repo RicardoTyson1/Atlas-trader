@@ -38,6 +38,7 @@ risk:
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
   off_hours_risk_pct: 1.0         # all other hours: 1% per trade (24/5 lost money in the replay)
   min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
+  max_spread_mult: 3.0            # skip an entry when the live spread is over 3x normal (news spikes, rollover)
 
 session:
   timezone: America/New_York
@@ -170,8 +171,11 @@ webhook:
     GOLD: XAUUSD.R
   max_alert_age_seconds: 120      # ignore alerts that arrive late
   max_entry_slip_r: 0.25          # skip if price is already >0.25R past the setup's entry
-  allowed_ips: []                 # optional: TradingView's IPs 52.89.214.238, 34.212.75.30,
-                                  # 54.218.53.128, 52.32.178.7 (secret is checked either way)
+  allowed_ips:                    # only TradingView may send alerts (its published webhook IPs,
+    - 52.89.214.238               # checked 2026-11-07); the secret is checked as well
+    - 34.212.75.30
+    - 54.218.53.128
+    - 52.32.178.7
 
 monitoring:
   label: "Atlas $10k bot"            # prefix on every Telegram message
