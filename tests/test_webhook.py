@@ -2,6 +2,7 @@
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import pandas as pd
@@ -131,3 +132,45 @@ def test_http_server_answers_fast_and_trades(cfg, monkeypatch):
     assert len(broker.positions()) == 1
     # GET must not leak account details
     assert urllib.request.urlopen(f"http://127.0.0.1:{port}/tv", timeout=1).read() == b"atlas webhook ok"
+
+
+def test_close_alert_never_touches_manual_trades(cfg):
+    broker, runner = make(cfg)
+    broker.add_manual("NAS100", 1, 1.0, stop=broker.last_price("NAS100") - 30)
+    code, msg = handle_alert(runner, {"secret": S, "symbol": "NAS100", "action": "close"}, S)
+    assert code == 200 and msg.startswith("skipped:no bot position")
+    assert len(broker.positions()) == 1                       # the manual trade is still open
+
+
+def test_close_alert_closes_bot_trade(cfg):
+    broker, runner = make(cfg)
+    _, ask = broker.quote("NAS100")
+    assert handle_alert(runner, {"secret": S, "symbol": "NAS100", "action": "buy", "stop": ask - 20}, S)[1] == "entered"
+    code, msg = handle_alert(runner, {"secret": S, "symbol": "NAS100", "action": "close"}, S)
+    assert (code, msg) == (200, "closed 1 bot position(s)")
+    assert not broker.positions()
+    assert any("closed 1 bot position" in m for m in runner.notify.messages)
+
+
+def test_allowlist_rejects_other_ips(cfg, monkeypatch):
+    broker, runner = make(cfg)
+    runner.cfg.webhook["allowed_ips"] = ["52.89.214.238"]
+    monkeypatch.setenv("WEBHOOK_SECRET", S)
+    port = 18788
+    threading.Thread(target=serve, args=(runner, "127.0.0.1", port), daemon=True).start()
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/tv", timeout=1).read()
+            break
+        except OSError:
+            time.sleep(0.05)
+    _, ask = broker.quote("NAS100")
+    body = json.dumps({"secret": S, "symbol": "NAS100", "action": "buy", "stop": ask - 20}).encode()
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/tv", data=body, method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=3)
+        assert False, "expected 403"
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+    time.sleep(0.2)
+    assert not broker.positions()

@@ -256,3 +256,26 @@ def test_rejects_trade_whose_target_pays_less_than_min_r(cfg):
     ok = runner._try_enter("NAS100", 1, ask - 10.0, ask + 20.0, None,
                            t.tz_convert("America/New_York"), broker.account().equity, 0, "test")
     assert ok == "entered"
+
+
+def test_spread_guard_skips_entries_when_spread_blows_out(cfg):
+    cfg.strategies = []
+    cfg.risk.max_spread_mult = 3.0                  # conftest NAS100 spread_points = 1.0
+    base, broker, runner, t = _guard_setup(cfg)
+    mid = broker.last_price("NAS100")
+    local, eq = t.tz_convert("America/New_York"), broker.account().equity
+    broker.quote = lambda s: (mid - 2.0, mid + 2.0)  # 4.0 wide = 4x normal
+    res = runner._try_enter("NAS100", 1, mid - 20, mid + 40, None, local, eq, 0, "test")
+    assert res.startswith("skipped:spread") and not broker.positions()
+    broker.quote = lambda s: (mid - 1.0, mid + 1.0)  # 2.0 wide = 2x normal: allowed
+    assert runner._try_enter("NAS100", 1, mid - 20, mid + 40, None, local, eq, 0, "test") == "entered"
+
+
+def test_spread_guard_off_by_default(cfg):
+    cfg.strategies = []
+    base, broker, runner, t = _guard_setup(cfg)
+    mid = broker.last_price("NAS100")
+    broker.quote = lambda s: (mid - 50.0, mid + 50.0)
+    res = runner._try_enter("NAS100", 1, mid - 200, mid + 400, None, t.tz_convert("America/New_York"),
+                            broker.account().equity, 0, "test")
+    assert not res.startswith("skipped:spread")
