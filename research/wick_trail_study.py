@@ -43,12 +43,14 @@ Pass bar (fixed before running), per model:
 Check built in: before any variant runs, the exit simulator replays the baseline and must
 reproduce the backtester's R on every trade (else the script stops).
 
+Runs one job at a time on a 1-CPU machine (the droplet has ~1 GB RAM and no swap; the bots come first).
 Run (never in /opt/atlas-trader):
   PYTHONPATH=. python research/wick_trail_study.py data/raw/XAUUSD.R_1m.csv
 """
 from __future__ import annotations
 
 import copy
+import os
 import sys
 from datetime import time
 from multiprocessing import Pool
@@ -282,8 +284,15 @@ def main(path: str) -> None:
     print(f"DATA {base.index[0]} -> {base.index[-1]} ({len(base):,} 1m bars) | "
           f"A {a.index[0].date()} -> {a.index[-1].date()} | B {b.index[0].date()} -> {b.index[-1].date()}", flush=True)
     jobs = [(m, p) for m in MODELS for p in ("A", "B")]
-    with Pool(min(4, len(jobs))) as pool:
-        res = pool.map(run_job, jobs)
+    procs = min(len(jobs), os.cpu_count() or 1)          # 1 CPU (the droplet): one job at a time, low memory
+    if procs <= 1:
+        res = []
+        for j in jobs:
+            res.append(run_job(j))
+            print(f"done {j[0]} half {j[1]}", flush=True)
+    else:
+        with Pool(procs) as pool:
+            res = pool.map(run_job, jobs)
     got = {(r["model"], r["part"]): r for r in res}
 
     rows, trades_out = [], []
