@@ -28,6 +28,8 @@ put the stop beyond the fast move's extreme, and trail it candle by candle.
 RESEARCH COPY: restored for research/wick_trail_study.py only. The live file was deleted on
 2026-11-06 (commit e05d7ad); rules are unchanged from commit e2ef3de (the 2026-11-05 shoot-out).
 Not registered with the bot. `_swings` is inlined from the deleted break_retest.py.
+2026-11-07: also outputs `move_ext` / `move_start` (the fast move's extreme and start at each signal)
+for research/reversal_target_study.py. Signals, stops and targets are unchanged.
 """
 from __future__ import annotations
 
@@ -119,6 +121,8 @@ class ReversalTrail(Strategy):
         tbuf = np.full(n, np.nan)
         spk = np.full(n, np.nan)
         kind = np.full(n, None, object)
+        mext = np.full(n, np.nan)                       # research output only: the fast move's
+        mstart = np.full(n, np.nan)                     # extreme and start at each signal
         finder = None
         setup = None  # (side_to_trade, extreme, i_extreme, move_start_price, rsi_ok)
         for i in range(mb + 1, n):
@@ -178,6 +182,7 @@ class ReversalTrail(Strategy):
             else:
                 rr[i] = float(p["reward_risk"]) if p["reward_risk"] > 0 else 1000.0
             sig[i], stop[i] = side, st
+            mext[i], mstart[i] = ext, start
             trs[i] = float(p["trail_start_r"])
             tbuf[i] = p["trail_buf_atr"] * ai
             spk[i] = p["spike_atr"] * ai if p["spike_atr"] > 0 else np.nan
@@ -190,4 +195,6 @@ class ReversalTrail(Strategy):
         out["spike_min_r"] = np.where(out["signal"] != 0, float(p["spike_min_r"]), np.nan)
         out["spike_mode"] = np.where(out["signal"] != 0, float(p["spike_mode"]), np.nan)
         out["tp_kind"] = np.where(out["signal"] != 0, kind, None)
+        out["move_ext"] = np.where(out["signal"] != 0, mext, np.nan)
+        out["move_start"] = np.where(out["signal"] != 0, mstart, np.nan)
         return out
