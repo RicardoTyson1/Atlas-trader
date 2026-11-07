@@ -221,6 +221,30 @@ def cmd_download(args, cfg: Config) -> None:
         print(f"{sym}: {len(df)} bars {df.index.min()} -> {df.index.max()} -> {path}  spec {broker.spec(sym)}")
 
 
+def cmd_spread(args, cfg: Config) -> None:
+    """Sample the live bid/ask spread (read-only) and compare it with the spread guard."""
+    import time as _time
+
+    from .brokers.tradelocker import TradeLockerBroker
+
+    _load_env()
+    allowed = cfg.tradelocker.get("demo_account_ids") or None
+    broker = TradeLockerBroker(cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com"),
+                               allowed_account_ids=[int(a) for a in allowed] if allowed else None)
+    inst = cfg.instrument(args.symbol)
+    mult = float(cfg.risk.max_spread_mult or 0)
+    limit = mult * inst.spread_points if mult > 0 else float("inf")
+    spreads = []
+    for _ in range(args.samples):
+        bid, ask = broker.quote(args.symbol)
+        spreads.append(ask - bid)
+        print(f"bid {bid:.2f}  ask {ask:.2f}  spread {ask - bid:.2f}"
+              + ("  << guard would SKIP" if ask - bid > limit else ""))
+        _time.sleep(args.every)
+    print(f"normal {inst.spread_points:.2f} | guard limit {limit:.2f} | "
+          f"median {sorted(spreads)[len(spreads) // 2]:.2f} | max {max(spreads):.2f}")
+
+
 def cmd_status(args, cfg: Config) -> None:
     """Plain-English health check from the bot's saved state."""
     import time as _t
@@ -312,6 +336,12 @@ def main(argv: list[str] | None = None) -> None:
     dl.add_argument("--tf", default="5m")
     dl.add_argument("--days", type=int, default=730)
     dl.set_defaults(fn=cmd_download)
+
+    sp = sub.add_parser("spread", help="sample the live spread vs the spread guard (read-only)")
+    sp.add_argument("symbol", nargs="?", default="XAUUSD.R")
+    sp.add_argument("--samples", type=int, default=10)
+    sp.add_argument("--every", type=float, default=2.0)
+    sp.set_defaults(fn=cmd_spread)
 
     st = sub.add_parser("status", help="show saved risk state")
     st.set_defaults(fn=cmd_status)

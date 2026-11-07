@@ -57,6 +57,8 @@ class RiskSettings:
     core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
     off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
     min_target_r: float = 1.0                 # skip a trade whose target pays < this x risk AT THE FILL PRICE
+    max_spread_mult: float = 0.0              # skip an entry when the live spread > this x the instrument's
+                                              # normal spread_points (0 = off)
 
 
 @dataclass

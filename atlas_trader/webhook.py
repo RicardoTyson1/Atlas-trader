@@ -145,9 +145,9 @@ def execute_alert(runner: Runner, order: dict[str, Any]) -> str:
     """Place (or close) the trade. Broker calls happen here."""
     sym = order["symbol"]
     if order["action"] == "close":
-        runner.broker.close_all(sym)
-        runner.notify.send(f"TradingView close {sym}")
-        return "closed"
+        # only the bot's own trades: a TradingView "close" must never touch manual positions
+        n = runner.close_bot_positions(sym, "TradingView close")
+        return f"closed {n} bot position(s)" if n else "skipped:no bot position to close"
     side = 1 if order["action"] == "buy" else -1
     worst = None
     entry = order.get("entry")

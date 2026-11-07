@@ -233,6 +233,11 @@ class Runner:
             return f"skipped:{why}"
         bid, ask = self.broker.quote(sym)
         price = ask if side > 0 else bid               # the price we will actually pay
+        inst = self.cfg.instrument(sym)
+        mult = float(self.cfg.risk.max_spread_mult or 0)
+        if mult > 0 and inst.spread_points > 0 and (ask - bid) > mult * inst.spread_points:
+            return (f"skipped:spread {ask - bid:.2f} is over {mult:g}x normal "
+                    f"({inst.spread_points:.2f})")
         if side * (price - stop) <= 0:
             return "skipped:price already through the stop"
         if worst_price is not None and side * (price - worst_price) > 0:
@@ -245,7 +250,6 @@ class Runner:
         if reward_r < self.cfg.risk.min_target_r:
             return (f"skipped:target pays only {reward_r:.2f}R at the fill price "
                     f"(min {self.cfg.risk.min_target_r:.2f}R)")
-        inst = self.cfg.instrument(sym)
         qty = self.rm.size(price, stop, inst, equity, when=local.to_pydatetime() if hasattr(local, "to_pydatetime") else local)
         if qty <= 0:
             return "skipped:size below minimum lot (stop too wide for risk budget)"
@@ -435,6 +439,17 @@ class Runner:
             rep = self._report(local)
             rep["guardian"] = rep.get("guardian", 0) + len(to_close)
         return actions
+
+    def close_bot_positions(self, symbol: str, reason: str = "TradingView close") -> int:
+        """Close only the bot's own positions on `symbol` (orders tagged by the bot); manual
+        trades on the same symbol are left alone. Returns how many were closed."""
+        with self.lock:
+            ids = [p.id for p in self.broker.positions() if p.symbol == symbol and p.tag == BOT_TAG]
+            if ids:
+                ok = self._close_verified(ids)
+                self.notify.send(f"{reason}: closed {len(ids)} bot position(s) on {symbol}"
+                                 + ("" if ok else " (NOT confirmed, check the account)"))
+            return len(ids)
 
     # ------------------------------------------------------------ closing
     def _close_verified(self, ids: list[str], symbol: str | None = None) -> bool:
