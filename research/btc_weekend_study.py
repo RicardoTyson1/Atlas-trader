@@ -31,7 +31,8 @@ Pass bar (fixed before running):
   5. Nothing passes -> say so. No retesting with new settings.
 
 Run (never in /opt/atlas-trader):
-  PYTHONPATH=. python research/btc_weekend_study.py data/raw/BTCUSD_1m.csv [--spread X --basis bid|mid]
+  PYTHONPATH=. python research/btc_weekend_study.py data/raw/BTCUSD_5m.csv [--spread X --basis bid|mid]
+  (the 5m file is the 1m download resampled; 15m is resampled from it)
 """
 from __future__ import annotations
 
@@ -166,7 +167,7 @@ def stats(r: np.ndarray) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("data", nargs="?", default="data/raw/BTCUSD_1m.csv")
+    ap.add_argument("data", nargs="?", default="data/raw/BTCUSD_5m.csv")
     ap.add_argument("--meta", default="research/btc_weekend_data.json")
     ap.add_argument("--spread", type=float, default=None, help="override: fixed spread in $")
     ap.add_argument("--basis", choices=("bid", "mid"), default=None)
@@ -176,7 +177,7 @@ def main() -> None:
     basis = args.basis or meta.get("bar_price_basis", {}).get("verdict", "mid")
     basis = basis if basis in ("bid", "mid") else "mid"
     base = load_csv(args.data)
-    print(f"DATA {base.index[0]} -> {base.index[-1]} ({len(base):,} 1m bars) | spread ${spread:.2f} fixed "
+    print(f"DATA {base.index[0]} -> {base.index[-1]} ({len(base):,} bars) | spread ${spread:.2f} fixed "
           f"(p90 live weekend sample) + ${SLIP:.0f} slippage/side | bars = {basis} prices | risk {RISK_NOTE}",
           flush=True)
     frames = {"5m": resample(base, "5m"), "15m": resample(base, "15m")}

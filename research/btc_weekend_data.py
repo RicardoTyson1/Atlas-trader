@@ -24,11 +24,13 @@ import pandas as pd
 
 from atlas_trader.cli import _load_env
 from atlas_trader.config import load_config
-from atlas_trader.weekend import in_weekend_window
+from atlas_trader.data import resample
 
 BTC = "BTCUSD"
 CHUNK_ROWS = 20000                   # the API rejects requests for more than 20,000 bars
-PAUSE = 10.0                         # be gentle: the live bots share these credentials
+PAUSE = 4.0                          # be gentle: the live bots share these credentials
+MAX_DAYS = 1100                      # ~3 years: the API goes back further, but the 1 GB server
+                                     # (shared with the live bots) can't hold more in memory
 
 
 def with_backoff(fn, *a, tries: int = 6, **kw):
@@ -53,7 +55,7 @@ def broker_from_config():
                              account_id=ids[0] if ids else None, allowed_account_ids=ids or None)
 
 
-def download_all(broker, max_days: int = 2000) -> pd.DataFrame:
+def download_all(broker, max_days: int = MAX_DAYS) -> pd.DataFrame:
     """Walk back in 20,000-minute chunks until two chunks in a row come back empty."""
     end = pd.Timestamp.now(tz="UTC").floor("min")
     frames, empty_run = [], 0
@@ -75,13 +77,20 @@ def download_all(broker, max_days: int = 2000) -> pd.DataFrame:
     return out[~out.index.duplicated(keep="last")]
 
 
+def weekend_mask(idx: pd.DatetimeIndex) -> np.ndarray:
+    """Vectorised atlas_trader.weekend.in_weekend_window (Fri 17:00 -> Sun 18:00 New York)."""
+    local = idx.tz_convert("America/New_York")
+    d, m = local.dayofweek.to_numpy(), (local.hour * 60 + local.minute).to_numpy()
+    return ((d == 4) & (m >= 17 * 60)) | (d == 5) | ((d == 6) & (m < 18 * 60))
+
+
 def gap_report(df: pd.DataFrame) -> dict:
     idx = df.index
     d = pd.Series(idx[1:] - idx[:-1], index=idx[:-1])
     gaps = d[d > pd.Timedelta(minutes=1)]
     big = gaps[gaps > pd.Timedelta(minutes=30)].sort_values(ascending=False)
     local = idx.tz_convert("America/New_York")
-    wk = np.array([in_weekend_window(t) for t in local.to_pydatetime()])
+    wk = weekend_mask(idx)
     weekends = pd.Index(local[wk].normalize()).unique()
     return {
         "first": str(idx[0]), "last": str(idx[-1]), "bars": int(len(idx)),
@@ -142,7 +151,9 @@ def main() -> None:
     df = download_all(broker)
     Path("data/raw").mkdir(parents=True, exist_ok=True)
     df.rename_axis("time").to_csv("data/raw/BTCUSD_1m.csv")
+    resample(df, "5m").rename_axis("time").to_csv("data/raw/BTCUSD_5m.csv")   # what the study uses
     rep = gap_report(df)
+    del df
     print(json.dumps(rep, indent=1), flush=True)
     print(f"sampling live spread: {args.samples} quotes, every {args.every:g}s ...", flush=True)
     s = sample_spread(broker, args.samples, args.every)
