@@ -110,7 +110,11 @@ def build(model: str, session):
 class Bars:
     """One timeframe of one half, with everything the exit simulator needs, precomputed."""
 
-    def __init__(self, df: pd.DataFrame, cfg, inst, spike_src: pd.DataFrame | None = None):
+    def __init__(self, df: pd.DataFrame, cfg, inst, parent: pd.DataFrame | None = None,
+                 exit_sig: pd.Series | None = None):
+        """`parent` = the signal-timeframe candles when the trail runs on a finer timeframe: the
+        big-candle lock and the strategy's exit signal are then judged at the parent candle's close.
+        `exit_sig` = the strategy's `exit` column on the signal timeframe (None = no exits)."""
         self.idx = df.index
         self.o, self.h, self.l, self.c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.atr = atr_ind(df, 14).to_numpy()
@@ -128,15 +132,24 @@ class Bars:
             force[i] = (rm.must_flatten(close_local[i].to_pydatetime()) is not None
                         or close_mins[i] >= flat_m or end or days[i + 1] != days[i])
         self.force = force
-        # big-candle lock candles: the bar itself, or (1m trail of a 5m model) the 5m candle closing here
+        # big-candle lock candles + strategy exit signals: the bar itself, or (trail on a finer
+        # timeframe) the signal-timeframe candle that closes on this bar
         self.spk_o, self.spk_c = self.o.copy(), self.c.copy()
         self.spk_on = np.ones(self.n, bool)
-        if spike_src is not None:
-            key = self.idx.floor("5min")
+        ex = np.zeros(self.n, int)
+        if parent is None:
+            if exit_sig is not None:
+                ex = exit_sig.reindex(self.idx).fillna(0).to_numpy(int)
+        else:
+            freq = pd.Series(parent.index).diff().mode().iloc[0]
+            key = self.idx.floor(freq)
             last = ~pd.Series(key).duplicated(keep="last").to_numpy()
-            five = spike_src.reindex(key)
-            self.spk_o, self.spk_c = five["open"].to_numpy(float), five["close"].to_numpy(float)
+            par = parent.reindex(key)
+            self.spk_o, self.spk_c = par["open"].to_numpy(float), par["close"].to_numpy(float)
             self.spk_on = last & ~np.isnan(self.spk_o)
+            if exit_sig is not None:
+                ex = np.where(self.spk_on, exit_sig.reindex(key).fillna(0).to_numpy(int), 0)
+        self.exit = ex
 
 
 def simulate(B: Bars, i0: int, side: int, entry: float, stop0: float, target: float,
@@ -166,6 +179,8 @@ def simulate(B: Bars, i0: int, side: int, entry: float, stop0: float, target: fl
                 return target + half_cost, "target", i
         if B.force[i]:
             return c[i] - side * half_cost, "flat", i
+        if B.exit[i] != 0 and B.exit[i] in (2, side):        # strategy exit signal (e.g. SuperTrend flip)
+            return c[i] - side * half_cost, "exit signal", i
         stop = manage(i, stop)
     raise RuntimeError("ran out of bars")                    # force[] is True on the last bar
 
@@ -216,11 +231,13 @@ def run_job(job):
     be_offset = half_cost + 2 * inst.commission_per_lot / inst.value_per_point
     sig_df = DATA[(spec["sig_tf"], part)]
     trades = run_backtest(sig_df, build(model, cfg.session), inst, cfg).trades
+    exit_sig = build(model, cfg.session).generate(sig_df)["exit"]
+    exit_sig = exit_sig if (exit_sig != 0).any() else None
     out = {"model": model, "part": part, "n": len(trades), "per_trade": {}}
     if trades.empty:
         return out
     # 1) the simulator must reproduce the backtester on the baseline
-    B_sig = Bars(sig_df, cfg, inst)
+    B_sig = Bars(sig_df, cfg, inst, exit_sig=exit_sig)
     i0s = B_sig.idx.get_indexer(trades.entry_time)
     assert (i0s >= 0).all()
     replay = []
@@ -236,9 +253,7 @@ def run_job(job):
     out["entry_time"] = list(trades.entry_time)
     # 2) every wick-trail variant on the same entries
     for tf in spec["trail_tfs"]:
-        df = DATA[("1m", part)] if tf == "1m" else DATA[("5m", part)]
-        spike_src = DATA[("5m", part)] if (tf == "1m" and spec["sig_tf"] == "5m") else None
-        B = B_sig if (tf == spec["sig_tf"]) else Bars(df, cfg, inst, spike_src=spike_src)
+        B = B_sig if tf == spec["sig_tf"] else Bars(DATA[(tf, part)], cfg, inst, parent=sig_df, exit_sig=exit_sig)
         i0v = np.searchsorted(B.idx.values, trades.entry_time.values)
         out.setdefault("entry_bar_mismatch", {})[tf] = int((B.idx.values[np.minimum(i0v, B.n - 1)] != trades.entry_time.values).sum())
         for buf in BUFFERS:
@@ -283,6 +298,12 @@ def main(path: str) -> None:
         DATA[("5m", part)] = resample(d, "5m")
     print(f"DATA {base.index[0]} -> {base.index[-1]} ({len(base):,} 1m bars) | "
           f"A {a.index[0].date()} -> {a.index[-1].date()} | B {b.index[0].date()} -> {b.index[-1].date()}", flush=True)
+    run_study("wick_trail")
+
+
+def run_study(tag: str) -> None:
+    """Run every model in MODELS on DATA (both halves) and write research/<tag>_results.csv and
+    research/<tag>_trades.csv, then print the tables and the verdict."""
     jobs = [(m, p) for m in MODELS for p in ("A", "B")]
     procs = min(len(jobs), os.cpu_count() or 1)          # 1 CPU (the droplet): one job at a time, low memory
     if procs <= 1:
@@ -318,8 +339,8 @@ def main(path: str) -> None:
                 trades_out.append({"model": model, "part": part, "entry_time": et,
                                    **{name: R["per_trade"][name][k] for name in R["per_trade"]}})
     t = pd.DataFrame(rows)
-    t.to_csv("research/wick_trail_results.csv", index=False)
-    pd.DataFrame(trades_out).to_csv("research/wick_trail_trades.csv", index=False)
+    t.to_csv(f"research/{tag}_results.csv", index=False)
+    pd.DataFrame(trades_out).to_csv(f"research/{tag}_trades.csv", index=False)
 
     for model, g in t.groupby("model", sort=False):
         print(f"\n=== {model} ===")
