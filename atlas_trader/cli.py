@@ -209,6 +209,7 @@ def cmd_download(args, cfg: Config) -> None:
     _load_env()
     allowed = cfg.tradelocker.get("demo_account_ids") or None
     broker = TradeLockerBroker(cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com"),
+                               account_id=int(allowed[0]) if allowed else None,
                                allowed_account_ids=[int(a) for a in allowed] if allowed else None)
     out_dir = Path("data/raw")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -230,6 +231,7 @@ def cmd_spread(args, cfg: Config) -> None:
     _load_env()
     allowed = cfg.tradelocker.get("demo_account_ids") or None
     broker = TradeLockerBroker(cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com"),
+                               account_id=int(allowed[0]) if allowed else None,
                                allowed_account_ids=[int(a) for a in allowed] if allowed else None)
     inst = cfg.instrument(args.symbol)
     mult = float(cfg.risk.max_spread_mult or 0)
