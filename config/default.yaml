@@ -106,7 +106,7 @@ instruments:
 # PAUSED 2026-11-05 (Ricardo): no bot-generated entries until a new strategy passes the backtest.
 # 2026-11-06: two new archetypes PASSED research/archetypes_study.py (positive in both halves of
 # 3.7 years, >= 100 trades; NOT strong, t < 2.5) and resume bot entries on the demo:
-# docs/RESULTS_ARCHETYPES_2026-11-06.md. TradingView alerts (webhook below) still trade too.
+# docs/RESULTS_ARCHETYPES_2026-11-06.md. TradingView alerts are OFF (webhook below, 2026-11-07).
 # To resume momentum_rsi as well, un-comment its block below.
 strategies:
   # smc_ob = H4 EMA-50 bias -> 5m liquidity sweep (24 candles) -> displacement FVG -> order-block
@@ -162,7 +162,9 @@ tradelocker:
 
 webhook:
   # TradingView alerts are executed through the same risk engine.
-  enabled: true                   # start the receiver with `atlas run` (no --webhook flag needed)
+  enabled: false                  # OFF 2026-11-07 (Ricardo): no alert ever reached the bot and no
+                                  # alert-based model (e.g. Silver Bullet) passed testing. Nothing listens
+                                  # on port 80 now. true = start the receiver with `atlas run`.
   host: 0.0.0.0
   port: 80                        # TradingView only sends to ports 80/443
   default_reward_risk: 2.0
