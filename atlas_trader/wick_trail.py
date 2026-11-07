@@ -18,6 +18,9 @@ Rules (long; a short is the exact mirror). Closed candles only: feed each candle
                        confirmation candle becomes the new S.
                        A strong candle that closes above S's high with no valid pullback
                        before it moves nothing and becomes the new S.
+  OPTIONS (for the bounded retest; defaults = the rules above):
+    `confirm_on="close"` : confirmation only needs to close above S's CLOSE (not its high).
+    `require_dip=False`  : any pullback counts, even without a lower low.
   BREAK-EVEN (P2)    : at activation, the stop moves to entry + `be_offset` (the costs of the
                        round trip, so a stop-out nets ~0R), forward only. If that candle closed
                        below the break-even price, it is applied at the first later close above it.
@@ -39,7 +42,10 @@ class WickTrail:
 
     def __init__(self, side: int, entry: float, init_stop: float, buffer_atr: float,
                  breakeven: bool = False, be_offset: float = 0.0, activate_r: float = 1.0,
-                 body_frac: float = 0.6, body_atr: float = 0.5) -> None:
+                 body_frac: float = 0.6, body_atr: float = 0.5, confirm_on: str = "high",
+                 require_dip: bool = True) -> None:
+        if confirm_on not in ("high", "close"):
+            raise ValueError("confirm_on must be 'high' or 'close'")
         if side not in (1, -1):
             raise ValueError("side must be +1 or -1")
         if side * (entry - init_stop) <= 0:
@@ -48,6 +54,7 @@ class WickTrail:
         self.buffer_atr = float(buffer_atr)
         self.activate_r = float(activate_r)
         self.body_frac, self.body_atr = float(body_frac), float(body_atr)
+        self.confirm_on, self.require_dip = confirm_on, bool(require_dip)
         # everything below is in "long space" (prices multiplied by side)
         self._entry = side * entry
         self._stop = side * init_stop
@@ -55,7 +62,7 @@ class WickTrail:
         self._be_price = self._entry + float(be_offset)
         self._be_pending = bool(breakeven)
         self.active = False
-        self._s_high: float | None = None      # high of the current strong candle S
+        self._s_high: float | None = None      # high (or close, if confirm_on="close") of strong candle S
         self._pb_low: float | None = None      # lowest low of the pullback since S
         self._pb_dip = False                   # a pullback candle undercut the previous candle's low
         self._prev_low: float | None = None
@@ -87,13 +94,13 @@ class WickTrail:
         strong = strong_body(1, o, h, l, c, atr, self.body_frac, self.body_atr)
         if self._s_high is None:
             if strong:
-                self._start_s(h)
+                self._start_s(h if self.confirm_on == "high" else c)
         elif strong and c > self._s_high:
-            if self._pb_low is not None and self._pb_dip:
+            if self._pb_low is not None and (self._pb_dip or not self.require_dip):
                 new = self._pb_low - self.buffer_atr * atr
                 if new > self._stop and new < c:
                     self._stop = moved = new
-            self._start_s(h)
+            self._start_s(h if self.confirm_on == "high" else c)
         else:                                            # a pullback candle
             self._pb_low = l if self._pb_low is None else min(self._pb_low, l)
             if self._prev_low is not None and l < self._prev_low:
