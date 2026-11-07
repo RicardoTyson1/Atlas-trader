@@ -28,7 +28,21 @@ from atlas_trader.weekend import in_weekend_window
 
 BTC = "BTCUSD"
 CHUNK_ROWS = 20000                   # the API rejects requests for more than 20,000 bars
-PAUSE = 3.0                          # be gentle: the live bots share these credentials
+PAUSE = 10.0                         # be gentle: the live bots share these credentials
+
+
+def with_backoff(fn, *a, tries: int = 6, **kw):
+    """Retry on HTTP 429 (Too Many Requests): wait 20 s, 40 s, 80 s ... then give up."""
+    wait = 20.0
+    for k in range(tries):
+        try:
+            return fn(*a, **kw)
+        except Exception as e:                          # the SDK raises requests' HTTPError
+            if "429" not in str(e) or k == tries - 1:
+                raise
+            print(f"  rate-limited, waiting {wait:.0f}s", flush=True)
+            time.sleep(wait)
+            wait *= 2
 
 
 def broker_from_config():
@@ -46,7 +60,7 @@ def download_all(broker, max_days: int = 2000) -> pd.DataFrame:
     t1 = end
     while (end - t1).days < max_days and empty_run < 2:
         t0 = t1 - pd.Timedelta(minutes=CHUNK_ROWS - 1)
-        df = broker.history(BTC, "1m", t0, t1, chunk_rows=CHUNK_ROWS, pause=0.0)
+        df = with_backoff(broker.history, BTC, "1m", t0, t1, chunk_rows=CHUNK_ROWS, pause=0.0)
         if df.empty:
             empty_run += 1
         else:
@@ -81,7 +95,7 @@ def sample_spread(broker, samples: int, every: float) -> dict:
     sp = []
     for _ in range(samples):
         try:
-            bid, ask = broker.quote(BTC)
+            bid, ask = with_backoff(broker.quote, BTC)
             sp.append(ask - bid)
         except Exception as e:                      # a rate-limit reply must not stop the sample
             print(f"  quote failed: {type(e).__name__}", flush=True)
@@ -98,10 +112,10 @@ def price_basis(broker, tries: int = 6) -> dict:
         now = pd.Timestamp.now(tz="UTC")
         time.sleep(max(0.0, 57.5 - now.second - now.microsecond / 1e6))
         minute = pd.Timestamp.now(tz="UTC").floor("min")
-        bid, ask = broker.quote(BTC)
+        bid, ask = with_backoff(broker.quote, BTC)
         time.sleep(6)
-        bars = broker.history(BTC, "1m", minute - pd.Timedelta(minutes=3), minute + pd.Timedelta(minutes=1),
-                              chunk_rows=CHUNK_ROWS, pause=0.0)
+        bars = with_backoff(broker.history, BTC, "1m", minute - pd.Timedelta(minutes=3),
+                            minute + pd.Timedelta(minutes=1), chunk_rows=CHUNK_ROWS, pause=0.0)
         if minute in bars.index:
             c = float(bars.loc[minute, "close"])
             rows.append({"bid": bid, "ask": ask, "close": c, "close-bid": c - bid, "ask-close": ask - c})
