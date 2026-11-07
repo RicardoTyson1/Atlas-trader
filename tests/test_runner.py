@@ -279,3 +279,81 @@ def test_spread_guard_off_by_default(cfg):
     res = runner._try_enter("NAS100", 1, mid - 200, mid + 400, None, t.tz_convert("America/New_York"),
                             broker.account().equity, 0, "test")
     assert not res.startswith("skipped:spread")
+
+
+# ---- 50k guardian corrections (2026-11-07) ----------------------------------------------
+def _guard50(cfg, allow_add=True, max_lots=0.5):
+    cfg.strategies = []
+    cfg.risk.guardian = True
+    cfg.risk.guardian_auto_stop = False
+    cfg.risk.guardian_allow_adding = allow_add
+    cfg.risk.max_lots = max_lots
+    cfg.risk.max_open_positions = 1
+    return _guard_setup(cfg)
+
+
+class _Pos:
+    def __init__(self, pid, symbol, qty, opened, has_stop=True):
+        self.id, self.symbol, self.qty, self.opened, self.has_stop = pid, symbol, qty, opened, has_stop
+        self.tag, self.side, self.entry, self.target = None, 1, 100.0, None
+
+
+def test_add_on_within_cap_is_allowed(cfg):
+    base, broker, runner, t = _guard50(cfg)
+    local = t.tz_convert("America/New_York")
+    closed = []
+    runner._close_verified = lambda ids, symbol=None: closed.extend(ids) or True
+    a, b = _Pos("a", "NAS100", 0.2, t), _Pos("b", "NAS100", 0.2, t + pd.Timedelta(seconds=5))
+    runner._guard([a, b], broker.account().balance, local)
+    assert closed == [] and "a" in runner.tracked and "b" in runner.tracked
+    assert runner.rm.s.trades_today == 1                      # the add-on is not a new trade
+    c = _Pos("c", "NAS100", 0.2, t + pd.Timedelta(seconds=9))  # 0.6 total > 0.5 cap
+    runner._guard([a, b, c], broker.account().balance, local)
+    assert closed == ["c"]
+
+
+def test_add_on_blocked_when_not_allowed(cfg):
+    base, broker, runner, t = _guard50(cfg, allow_add=False)
+    closed = []
+    runner._close_verified = lambda ids, symbol=None: closed.extend(ids) or True
+    a, b = _Pos("a", "NAS100", 0.1, t), _Pos("b", "NAS100", 0.1, t + pd.Timedelta(seconds=5))
+    runner._guard([a, b], broker.account().balance, t.tz_convert("America/New_York"))
+    assert closed == ["b"]
+
+
+def test_always_open_symbol_trades_on_weekends_and_daily_break(cfg):
+    from atlas_trader.config import Instrument
+    base, broker, runner, t = _guard50(cfg)
+    cfg.instruments["BTCUSD"] = Instrument("BTCUSD", value_per_point=1.0, always_open=True)
+    sat = pd.Timestamp("2026-11-07 11:00", tz="America/New_York")
+    brk = pd.Timestamp("2026-11-09 17:15", tz="America/New_York")
+    for when in (sat, brk):
+        ok, why = runner.rm.check_entry(when.to_pydatetime(), 0, always_open=True)
+        assert ok, why
+        assert not runner.rm.check_entry(when.to_pydatetime(), 0)[0]   # gold stays blocked
+    closed = []
+    runner._close_verified = lambda ids, symbol=None: closed.extend(ids) or True
+    runner._guard([_Pos("btc", "BTCUSD", 0.1, sat.tz_convert("UTC"))], broker.account().balance, sat)
+    assert closed == [] and "btc" in runner.tracked
+
+
+def test_unknown_symbol_without_stop_says_why(cfg):
+    base, broker, runner, t = _guard50(cfg)
+    cfg.risk.guardian_auto_stop = True
+    cfg.risk.guardian_stop_grace_seconds = 0
+    closed = []
+    runner._close_verified = lambda ids, symbol=None: closed.extend(ids) or True
+    acts = runner._guard([_Pos("x", "ETHUSD", 0.1, t, has_stop=False)], broker.account().balance,
+                         t.tz_convert("America/New_York"))
+    assert closed == ["x"] and any("not set up in the config" in a for a in acts)
+
+
+def test_topstep50k_config_values():
+    from atlas_trader.config import load_config
+    c = load_config("config/topstep50k.yaml")
+    assert c.risk.max_lots == 0.5 and c.risk.cooldown_after_loss_minutes == 5
+    assert c.risk.guardian_allow_adding is True
+    assert c.prop.daily_loss_pct * c.prop.safety_buffer * c.starting_balance / 100 == 500
+    btc = c.instrument("BTCUSD")
+    assert btc.always_open and btc.value_per_point == 1.0
+    assert not c.instrument("XAUUSD.R").always_open
