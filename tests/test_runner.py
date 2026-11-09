@@ -357,3 +357,34 @@ def test_topstep50k_config_values():
     btc = c.instrument("BTCUSD")
     assert btc.always_open and btc.value_per_point == 1.0
     assert not c.instrument("XAUUSD.R").always_open
+
+
+def test_bars_fetched_once_per_step_for_shared_timeframe(cfg):
+    """Many strategies on the same symbol/timeframe share one bar download per step (API limits)."""
+    from atlas_trader.config import StrategySpec
+    cfg.strategies = [StrategySpec("momentum_rsi", ["NAS100"], "5m", label=f"m{i}") for i in range(5)]
+    base, broker, runner = make(cfg, days=2)
+    calls = []
+    real = broker.bars
+    broker.bars = lambda sym, tf, n: (calls.append((sym, tf)), real(sym, tf, n))[1]
+    t = base.index[0] + pd.Timedelta(hours=2)
+    broker.set_time(t)
+    runner.step(t)
+    assert calls.count(("NAS100", "5m")) == 1
+    t2 = t + pd.Timedelta("5min")
+    broker.set_time(t2)
+    runner.step(t2)                                   # next step downloads fresh bars again
+    assert calls.count(("NAS100", "5m")) == 2
+
+
+def test_config_order_is_priority_when_two_strategies_signal_together(cfg):
+    """'Proven first' (Ricardo, 2026-11-09): the first strategy in the config that signals takes the slot."""
+    from atlas_trader.config import StrategySpec
+    cfg.strategies = [StrategySpec("momentum_rsi", ["NAS100"], "5m", label="proven"),
+                      StrategySpec("momentum_rsi", ["NAS100"], "5m", label="test_only")]
+    base, broker, runner = make(cfg)
+    drive(base, broker, runner)
+    entries = [m for m in runner.notify.messages if m.startswith(("BUY", "SELL"))]
+    assert entries, "expected at least one entry"
+    assert all("(proven)" in m or "proven)" in m for m in entries)
+    assert not any("test_only" in m for m in entries)
