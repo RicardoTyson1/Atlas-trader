@@ -15,9 +15,9 @@ prop_rules:
   firm: personal-gatesfx
   phase: funded                   # funded = no "profit target reached" stop
   profit_target_pct: 100.0
-  daily_loss_pct: 10.0            # done for the day at -10% (-$1,000 on $10k; bot stops at -9% via safety_buffer)
+  daily_loss_pct: 100.0           # day stop OFF (Ricardo 2026-11-09, demo). Was -10%/day
   daily_loss_basis: start_of_day
-  max_drawdown_pct: 30.0          # bot stops completely at -30% from the start ($7,000; bot at -27%)
+  max_drawdown_pct: 50.0          # backstop only: bot stops at -45% from the start (~$5,500). Was -30% (Ricardo 2026-11-09, demo)
   drawdown_type: static
   trailing_on: equity
   trail_locks_at_initial: true
@@ -36,7 +36,7 @@ risk:
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
-  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (strategies only enter 08-11 anyway)
+  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (24/5 since 2026-11-09)
   min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
   max_spread_mult: 3.0            # skip an entry when the live spread is over 3x normal (news spikes, rollover)
 
@@ -119,7 +119,7 @@ strategies:
     params:
       sweep_bars: 24
       reward_risk: 0.0
-      hours: "08:00-11:00"
+      hours: "00:00-23:59"
   # st_confluence = SuperTrend(10,3) trend + MACD agrees + above-average volume, pullback to the
   # SuperTrend line -> entry; stop beyond the line; trail from +1R; SuperTrend flip exits.
   # Study: n=113, 42.5% wins, +0.054R/trade, t=0.46 (A +0.069, B +0.038) - a marginal pass.
@@ -130,7 +130,7 @@ strategies:
     params:
       st_mult: 3.0
       vol_mult: 0.0
-      hours: "08:00-11:00"
+      hours: "00:00-23:59"
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
@@ -144,9 +144,8 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "08:00-11:00"          # entries 08-11 NY only. no_chase_study (2026-11-06, 3.7 years 5m):
-                                    # off-hours entries lost -261R (2023-24) and -29R (2025-26).
-                                    # Was 00:00-23:59. Open trades still trail on 1m candles outside 08-11.
+      hours: "00:00-23:59"          # 24/5 since 2026-11-09 (Ricardo, demo) DESPITE no_chase_study (3.7 years 5m):
+                                    # off-hours entries lost -261R (2023-24) and -29R (2025-26). Was 08:00-11:00.
       max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
       max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
       run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
