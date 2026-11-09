@@ -151,6 +151,90 @@ strategies:
       run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
                                     # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
+  # ======================================================================================
+  # TEST-ONLY setups, re-added 2026-11-09 (Ricardo, demo): every setup we discussed that was
+  # tested and removed, plus the new chart patterns. Their original tests FAILED (or barely
+  # passed) - see docs/RESULTS_*.md and research/full_retest_study.py. They run so the demo can
+  # judge them live. PRIORITY = ORDER IN THIS LIST: the bot holds one trade at a time and the
+  # first strategy above that signals takes the slot, so the 3 proven setups always come first.
+  # ======================================================================================
+  - name: reversal_trail            # Card 5: fast move + extreme RSI -> CHoCH, target 50% of the move
+    label: reversal_trail_5m
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+    params: {move_atr: 3.0, rsi_level: 25, target: half_move, spike_atr: 2.5, hours: "00:00-23:59"}
+  - name: reversal_trail
+    label: reversal_trail_1m
+    instruments: [XAUUSD.R]
+    timeframe: 1m
+    history_bars: 600
+    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "00:00-23:59"}
+  - name: chart_patterns            # NEW: 11 classic patterns, breakout close, measured-move target
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+    params: {patterns: all, hours: "00:00-23:59"}
+  - name: bb_reversion              # fade a 2.5-sigma Bollinger close back to the middle band
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+    params: {hours: "00:00-23:59"}
+  - name: liquidity_fvg             # ICT 2022 model: killzone sweep -> displacement FVG -> retrace
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 6000              # needs ~20 days for the premium/discount range
+  - name: silver_bullet             # ICT Silver Bullet: first FVG in the 10-11 NY window
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 6000              # ~20 days for the bias
+  - name: trend_break               # trendline break -> retest -> rejection (15m lines, 5m entry)
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 1500
+    params: {hours: "00:00-23:59"}
+  - name: zone_retest               # supply / demand zone: base -> displacement -> first return
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 1500
+    params: {hours: "00:00-23:59"}
+  - name: break_retest              # Cards 1-2: consolidation break, CHoCH/BOS, verified retest (1m)
+    instruments: [XAUUSD.R]
+    timeframe: 1m
+    history_bars: 600
+    params: {hours: "00:00-23:59"}
+  - name: orb                       # opening-range breakout (09:30 NY)
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+  - name: session_breakout          # Asian range (00-03 NY) breakout before 08:00
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+  - name: trend_pullback            # 20/50 EMA trend pullback
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+  - name: vwap_reversion            # stretched from VWAP + RSI extreme -> fade
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+  - name: donchian_trend            # 55-bar channel breakout, multi-day trend
+    instruments: [XAUUSD.R]
+    timeframe: 1H
+    history_bars: 600
+    params: {entry_bars: 55, exit_bars: 20}
+  - name: time_drift                # evening long drift: buy 20:00 NY, hold 3 hours
+    instruments: [XAUUSD.R]
+    timeframe: 1H
+    history_bars: 600
+    params: {entry_time: "20:00", hold_bars: 3}
+  - name: scalp                     # 60-second scalper (lowest priority: costs ate it in testing)
+    instruments: [XAUUSD.R]
+    timeframe: 1m
+    history_bars: 600
+    params: {hours: "00:00-23:59"}
+
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
   # The account-ID allowlist keeps the bot on the intended account.
