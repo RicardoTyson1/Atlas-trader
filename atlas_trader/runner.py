@@ -116,9 +116,20 @@ class Runner:
         with self.lock:
             return self._step(now or pd.Timestamp.now(tz="UTC"))
 
+    def _bars(self, sym: str, tf: str, count: int) -> pd.DataFrame:
+        """Bars, fetched at most once per symbol/timeframe per step (many strategies share them)."""
+        cache = self.__dict__.setdefault("_bar_cache", {})
+        hit = cache.get((sym, tf))
+        if hit is not None and hit[0] >= count:
+            return hit[1].tail(count)
+        df = self.broker.bars(sym, tf, count)
+        cache[(sym, tf)] = (count, df)
+        return df
+
     def _step(self, now: pd.Timestamp) -> list[str]:
         actions: list[str] = []
         local = now.tz_convert(self.cfg.session.tz)
+        self._bar_cache = {}                           # fresh bars every step
 
         if self.kill_file.exists():
             ok = self._flatten("kill switch")
@@ -186,7 +197,7 @@ class Runner:
         expected_last = now.floor(tf) - tf          # newest bar that should be complete
         if self.extra["last_signal_bar"].get(key) == str(expected_last):
             return None                              # nothing new since last evaluation
-        bars = self.broker.bars(sym, spec.timeframe, spec.history_bars)
+        bars = self._bars(sym, spec.timeframe, spec.history_bars)
         m = local.hour * 60 + local.minute
         sess = self.cfg.session
         if sess.reopen is not None:
@@ -541,7 +552,7 @@ class Runner:
             self._close_verified([pid])
             self.notify.send(f"Time exit {sym} after {t['max_bars']:.0f} bars.")
             return "exit:time"
-        bars = self.broker.bars(sym, spec.timeframe, spec.history_bars)
+        bars = self._bars(sym, spec.timeframe, spec.history_bars)
         if bars.empty:
             return None
         ex = int(strat.generate(bars)["exit"].iloc[-1])
@@ -553,7 +564,7 @@ class Runner:
         trail_bars = bars
         local = now.tz_convert(self.cfg.session.tz)
         if spec.timeframe != "1m" and self.cfg.risk.core_hours and not self.rm.in_core_hours(local.to_pydatetime()):
-            b1 = self.broker.bars(sym, "1m", 300)
+            b1 = self._bars(sym, "1m", 300)
             if not b1.empty:
                 trail_bars = b1
         return self._trail(pid, t, pos, sym, trail_bars)
