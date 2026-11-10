@@ -388,3 +388,27 @@ def test_config_order_is_priority_when_two_strategies_signal_together(cfg):
     assert entries, "expected at least one entry"
     assert all("(proven)" in m or "proven)" in m for m in entries)
     assert not any("test_only" in m for m in entries)
+
+
+def test_no_cooldown_when_turned_off_and_old_one_is_cleared(cfg):
+    """cooldown_after_loss_minutes = 0 (Ricardo, 2026-11-10): a loss sets no cooldown, an old saved one is
+    wiped, and the close message never shows a stale 'cooldown until'."""
+    from datetime import datetime, timedelta
+    cfg.risk.cooldown_after_loss_minutes = 0
+    base, broker, runner = make(cfg, days=1)
+    now = datetime(2026, 11, 10, 10, 15)   # inside the test session window
+    runner.rm.s.cooldown_until = (now - timedelta(days=5)).isoformat()   # stale value from an old day
+    runner.rm.record_close(-54.74, now)
+    assert runner.rm.s.cooldown_until is None
+    ok, why = runner.rm.check_entry(now + timedelta(minutes=1), 0)
+    assert ok, why
+
+
+def test_cooldown_still_works_when_set(cfg):
+    from datetime import datetime, timedelta
+    cfg.risk.cooldown_after_loss_minutes = 15
+    base, broker, runner = make(cfg, days=1)
+    now = datetime(2026, 11, 10, 10, 0)
+    runner.rm.record_close(-10.0, now)
+    ok, _ = runner.rm.check_entry(now + timedelta(minutes=5), 0)
+    assert not ok
