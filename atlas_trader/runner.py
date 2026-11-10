@@ -23,6 +23,7 @@ import json
 import logging
 import threading
 import time as _time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -326,8 +327,10 @@ class Runner:
         self.rm.record_close(pnl, when)
         rep = self._report(local)
         rep["closed"] = rep.get("closed", 0) + len(gone)
+        cd = self.rm.s.cooldown_until
+        active = bool(cd) and when is not None and datetime.fromisoformat(cd) > when
         self.notify.send(f"Closed {', '.join(syms)}: P/L ${pnl:,.2f}"
-                         + (f" | cooldown until {self.rm.s.cooldown_until[11:16]}" if pnl < 0 and self.rm.s.cooldown_until else ""))
+                         + (f" | cooldown until {cd[11:16]}" if pnl < 0 and active else ""))
 
     def _journal(self, gone: list, pnl: float, local) -> None:
         """Append closed trades to state/journal.csv (learning-mode record)."""

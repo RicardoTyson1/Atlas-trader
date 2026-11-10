@@ -258,7 +258,9 @@ class RiskManager:
 
     def record_close(self, pnl: float, when: datetime | None = None) -> None:
         self.s.consec_losses = self.s.consec_losses + 1 if pnl < 0 else 0
-        if pnl < 0 and when is not None and self.risk.cooldown_after_loss_minutes > 0:
+        if self.risk.cooldown_after_loss_minutes <= 0:
+            self.s.cooldown_until = None              # cooldown off: never keep an old one around
+        elif pnl < 0 and when is not None:
             until = when + timedelta(minutes=self.risk.cooldown_after_loss_minutes)
             self.s.cooldown_until = until.isoformat()
 
