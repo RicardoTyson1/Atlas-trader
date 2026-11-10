@@ -36,7 +36,7 @@ risk:
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
-  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (24/5 since 2026-11-09)
+  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (no strategy enters outside 08-11 now)
   min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
   max_spread_mult: 3.0            # skip an entry when the live spread is over 3x normal (news spikes, rollover)
 
@@ -119,7 +119,7 @@ strategies:
     params:
       sweep_bars: 24
       reward_risk: 0.0
-      hours: "00:00-23:59"
+      hours: "08:00-11:00"
   # st_confluence = SuperTrend(10,3) trend + MACD agrees + above-average volume, pullback to the
   # SuperTrend line -> entry; stop beyond the line; trail from +1R; SuperTrend flip exits.
   # Study: n=113, 42.5% wins, +0.054R/trade, t=0.46 (A +0.069, B +0.038) - a marginal pass.
@@ -130,7 +130,7 @@ strategies:
     params:
       st_mult: 3.0
       vol_mult: 0.0
-      hours: "00:00-23:59"
+      hours: "08:00-11:00"
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
@@ -144,96 +144,31 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "00:00-23:59"          # 24/5 since 2026-11-09 (Ricardo, demo) DESPITE no_chase_study (3.7 years 5m):
-                                    # off-hours entries lost -261R (2023-24) and -29R (2025-26). Was 08:00-11:00.
+      hours: "08:00-11:00"          # 08-11 only: all-hours entries lost (no_chase_study -261R / -29R;
+                                    # full_retest_study 2026-11-09). Back from 24/5 on 2026-11-09 (Ricardo).
       max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
       max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
       run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
                                     # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
   # ======================================================================================
-  # TEST-ONLY setups, re-added 2026-11-09 (Ricardo, demo): every setup we discussed that was
-  # tested and removed, plus the new chart patterns. Their original tests FAILED (or barely
-  # passed) - see docs/RESULTS_*.md and research/full_retest_study.py. They run so the demo can
-  # judge them live. PRIORITY = ORDER IN THIS LIST: the bot holds one trade at a time and the
-  # first strategy above that signals takes the slot, so the 3 proven setups always come first.
+  # Re-test 2026-11-09 (research/full_retest_study.py, 3.7 yrs 5m / 13 mo 1m, real costs):
+  # of every setup re-added that day, ONLY these two passed (positive in both halves, >= 100
+  # trades), and only at 08-11 NY. Every all-hours version lost. The other 14 were removed from
+  # the bot (code kept). Order = priority: the 3 proven setups above come first.
   # ======================================================================================
   - name: reversal_trail            # Card 5: fast move + extreme RSI -> CHoCH, target 50% of the move
-    label: reversal_trail_5m
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-    params: {move_atr: 3.0, rsi_level: 25, target: half_move, spike_atr: 2.5, hours: "00:00-23:59"}
-  - name: reversal_trail
-    label: reversal_trail_1m
+    label: reversal_trail_1m        # re-test: 123 trades, 69.1% wins, +0.085R (A +0.025, B +0.143), t 1.21
     instruments: [XAUUSD.R]
     timeframe: 1m
     history_bars: 600
-    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "00:00-23:59"}
-  - name: chart_patterns            # NEW: 11 classic patterns, breakout close, measured-move target
+    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00"}
+  - name: chart_patterns            # symmetrical triangle only: 153 trades, 39.2% wins, +0.024R
+    label: symmetrical_triangle     # (A +0.040, B +0.008), t 0.2 - a marginal pass, first to cut
     instruments: [XAUUSD.R]
     timeframe: 5m
     history_bars: 600
-    params: {patterns: all, hours: "00:00-23:59"}
-  - name: bb_reversion              # fade a 2.5-sigma Bollinger close back to the middle band
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-    params: {hours: "00:00-23:59"}
-  - name: liquidity_fvg             # ICT 2022 model: killzone sweep -> displacement FVG -> retrace
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 6000              # needs ~20 days for the premium/discount range
-  - name: silver_bullet             # ICT Silver Bullet: first FVG in the 10-11 NY window
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 6000              # ~20 days for the bias
-  - name: trend_break               # trendline break -> retest -> rejection (15m lines, 5m entry)
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 1500
-    params: {hours: "00:00-23:59"}
-  - name: zone_retest               # supply / demand zone: base -> displacement -> first return
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 1500
-    params: {hours: "00:00-23:59"}
-  - name: break_retest              # Cards 1-2: consolidation break, CHoCH/BOS, verified retest (1m)
-    instruments: [XAUUSD.R]
-    timeframe: 1m
-    history_bars: 600
-    params: {hours: "00:00-23:59"}
-  - name: orb                       # opening-range breakout (09:30 NY)
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-  - name: session_breakout          # Asian range (00-03 NY) breakout before 08:00
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-  - name: trend_pullback            # 20/50 EMA trend pullback
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-  - name: vwap_reversion            # stretched from VWAP + RSI extreme -> fade
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-  - name: donchian_trend            # 55-bar channel breakout, multi-day trend
-    instruments: [XAUUSD.R]
-    timeframe: 1H
-    history_bars: 600
-    params: {entry_bars: 55, exit_bars: 20}
-  - name: time_drift                # evening long drift: buy 20:00 NY, hold 3 hours
-    instruments: [XAUUSD.R]
-    timeframe: 1H
-    history_bars: 600
-    params: {entry_time: "20:00", hold_bars: 3}
-  - name: scalp                     # 60-second scalper (lowest priority: costs ate it in testing)
-    instruments: [XAUUSD.R]
-    timeframe: 1m
-    history_bars: 600
-    params: {hours: "00:00-23:59"}
+    params: {patterns: symmetrical_triangle, hours: "08:00-11:00"}
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
