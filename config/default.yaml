@@ -57,6 +57,8 @@ session:
 news_blackouts:
   minutes_before: 15
   minutes_after: 15
+  no_entry_minutes_before: 30     # no NEW trades 30 min before the flatten (= 45 min before the news):
+                                  # 2026-11-10 08:05 momentum_rsi entry was flattened 10 min later (-$55)
   events: []                      # extra events by hand, e.g. "2026-11-07 08:30"
   # High-impact USD events from the economic calendar, refreshed automatically
   # (atlas_trader/news.py). The morning Telegram message lists today's events.
