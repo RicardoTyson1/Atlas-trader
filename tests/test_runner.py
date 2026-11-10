@@ -412,3 +412,42 @@ def test_cooldown_still_works_when_set(cfg):
     runner.rm.record_close(-10.0, now)
     ok, _ = runner.rm.check_entry(now + timedelta(minutes=5), 0)
     assert not ok
+
+
+def test_order_error_that_fills_late_keeps_its_setup(cfg):
+    """2026-11-09 22:45: the broker answered an order with an error, then the position showed up.
+    The bot must not send a second order, and must track the late fill with its own stop/strategy."""
+    base, broker, runner = make(cfg)
+    real = broker.market_bracket
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(a)
+        if len(calls) == 1:
+            real(*a, **k)                       # the order goes through...
+            raise RuntimeError("HTTP 500")      # ...but the broker reports an error
+        return real(*a, **k)
+
+    broker.market_bracket = flaky
+    t = base.index[0] + pd.Timedelta("5min")
+    while not calls and t <= base.index[-1]:
+        broker.set_time(t)
+        runner.step(t)
+        t += pd.Timedelta("5min")
+    assert calls, "expected an entry attempt"
+    assert "NAS100" in runner.pending
+    assert any("broker error" in m for m in runner.notify.messages)
+    broker.set_time(t)
+    runner.step(t)                              # next poll sees the position
+    assert len(calls) == 1                      # no duplicate order
+    assert not runner.pending
+    (rec,) = runner.tracked.values()
+    assert rec["strategy"] == "momentum_rsi" and rec["init_stop"] is not None
+    assert any("confirmed late" in m for m in runner.notify.messages)
+
+
+def test_order_error_that_never_fills_frees_the_symbol(cfg):
+    base, broker, runner = make(cfg)
+    runner.pending["NAS100"] = {"symbol": "NAS100", "side": 1, "strategy": "x",
+                                "sent": str(pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=11))}
+    assert runner._pending_for("NAS100") is None and not runner.pending

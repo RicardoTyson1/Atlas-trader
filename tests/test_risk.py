@@ -149,3 +149,14 @@ def test_off_hours_risk_is_smaller():
     off = rm.size(4100.0, 4090.0, inst, 10_000, when=datetime(2026, 11, 6, 20, 0, tzinfo=ny))
     assert rm.risk_pct_at(datetime(2026, 11, 6, 11, 0, tzinfo=ny)) == 1.0     # 11:00 is outside
     assert core == 0.5 and off == 0.1                                          # $500 vs $100 at 10-pt risk
+
+
+def test_no_new_entries_right_before_news(cfg):
+    """2026-11-10: an 08:05 entry was flattened at 08:15 for 08:30 news. No new trades in the run-up."""
+    cfg.news.events = [ny(12, 0)]
+    cfg.news.minutes_before = 15
+    cfg.news.no_entry_minutes_before = 30
+    r = rm_for(cfg)
+    assert r.check_entry(ny(11, 5))[0], r.check_entry(ny(11, 5))         # 40 min before the blackout: ok
+    assert "news coming up" in r.check_entry(ny(11, 20))[1]              # 25 min before the blackout
+    assert r.must_flatten(ny(11, 20)) is None                            # open trades are left alone
