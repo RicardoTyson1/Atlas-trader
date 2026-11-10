@@ -123,6 +123,7 @@ class NewsBlackouts:
     events: list[datetime] = field(default_factory=list)  # tz-aware, from the config
     feed_file: str | None = None      # calendar events saved by atlas_trader.news.refresh
     feed: dict[str, Any] = field(default_factory=dict)    # url / countries / impacts / refresh_hours
+    no_entry_minutes_before: int = 0  # extra: no NEW entries this long before the flatten starts
     _feed_mtime: float = field(default=-1.0, repr=False)
     _feed_events: list[datetime] = field(default_factory=list, repr=False)
 
@@ -144,6 +145,13 @@ class NewsBlackouts:
 
     def active(self, ts: datetime) -> bool:
         b = timedelta(minutes=self.minutes_before)
+        a = timedelta(minutes=self.minutes_after)
+        return any(ev - b <= ts <= ev + a for ev in self.all_events())
+
+    def entry_blocked(self, ts: datetime) -> bool:
+        """No new trades from (minutes_before + no_entry_minutes_before) before a release: a trade
+        opened just before the blackout would only be flattened minutes later (Ricardo, 2026-11-10)."""
+        b = timedelta(minutes=self.minutes_before + self.no_entry_minutes_before)
         a = timedelta(minutes=self.minutes_after)
         return any(ev - b <= ts <= ev + a for ev in self.all_events())
 
@@ -193,7 +201,8 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         for e in (nb.get("events") or [])
     ]
     news = NewsBlackouts(nb.get("minutes_before", 15), nb.get("minutes_after", 15), events,
-                         feed_file=nb.get("feed_file"), feed=dict(nb.get("feed") or {}))
+                         feed_file=nb.get("feed_file"), feed=dict(nb.get("feed") or {}),
+                         no_entry_minutes_before=int(nb.get("no_entry_minutes_before", 0)))
     instruments = {
         sym: Instrument(symbol=sym, **(vals or {}))
         for sym, vals in (raw.get("instruments") or {}).items()

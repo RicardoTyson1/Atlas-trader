@@ -185,6 +185,8 @@ class RiskManager:
             return False, "outside entry window"
         if self.news.active(ts_local):
             return False, "news blackout"
+        if self.news.entry_blocked(ts_local):
+            return False, "news coming up (no new trades right before a blackout)"
         if self.s.cooldown_until and ts_local < datetime.fromisoformat(self.s.cooldown_until):
             return False, f"cooldown after loss until {self.s.cooldown_until[11:16]}"
         if self.s.trades_today >= self.risk.max_trades_per_day:

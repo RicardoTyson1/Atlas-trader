@@ -105,6 +105,23 @@ class Runner:
     def tracked(self) -> dict:
         return self.extra["tracked"]
 
+    PENDING_MINUTES = 10
+
+    @property
+    def pending(self) -> dict:
+        """Orders the broker answered with an error: symbol -> the trade record (late fills)."""
+        return self.extra.setdefault("pending", {})
+
+    def _pending_for(self, sym: str) -> dict | None:
+        rec = self.pending.get(sym)
+        if rec is None:
+            return None
+        age = pd.Timestamp.now(tz="UTC") - pd.Timestamp(rec["sent"])
+        if age > pd.Timedelta(minutes=self.PENDING_MINUTES):
+            self.pending.pop(sym, None)                 # it never filled: free the symbol again
+            return None
+        return rec
+
     def _alert_once(self, key: str, msg: str, level: int = logging.WARNING) -> None:
         """Send `msg` at most once per `key` (keys usually include the date)."""
         if self.extra["alerts"].get(key):
@@ -243,6 +260,8 @@ class Runner:
                    max_bars: float | None = None, trail: tuple[float, float] | None = None,
                    spike: tuple[float, float, int] | None = None, worst_price: float | None = None,
                    tp_note: str | None = None) -> str:
+        if self._pending_for(sym) is not None:
+            return "skipped:waiting for an unconfirmed order to show up"
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open,
                                       always_open=self._always_open(sym))
         if not ok:
@@ -272,18 +291,30 @@ class Runner:
             return "skipped:size below minimum lot (stop too wide for risk budget)"
         bal_before = self.broker.account().balance     # before the opening fee is charged
         risk_usd = self.rm.risk_per_lot(price, stop, inst) * qty
-        pid = self.broker.market_bracket(sym, side, qty, stop, target)
+        rec = {"symbol": sym, "bot": True, "bal_before": bal_before,
+               "entry_time": str(pd.Timestamp.now(tz="UTC")), "max_bars": max_bars,
+               "strategy": source, "side": side, "init_stop": stop, "stop": stop,
+               "target": target,
+               "trail_start_r": trail[0] if trail else None,
+               "trail_buf": trail[1] if trail else None,
+               "spike_pts": spike[0] if spike else None,
+               "spike_min_r": spike[1] if spike else None,
+               "spike_mode": spike[2] if spike else None,
+               "risk_usd": risk_usd}
+        try:
+            pid = self.broker.market_bracket(sym, side, qty, stop, target)
+        except Exception as e:
+            # The broker may still fill an order it answered with an error (2026-11-09 22:45: an
+            # error page, then the position showed up 33 s later). Remember the order so a late fill
+            # is tracked with THIS setup's stop/trail, and don't send another order meanwhile.
+            self.pending[sym] = {**rec, "sent": str(pd.Timestamp.now(tz="UTC"))}
+            self.save()
+            self.notify.send(f"Order {'BUY' if side > 0 else 'SELL'} {qty} {sym} ({source}) got a broker error; "
+                             f"watching for a late fill for {self.PENDING_MINUTES} min, no new orders meanwhile. "
+                             f"({type(e).__name__})", logging.WARNING)
+            return "error:order unconfirmed"
         self.rm.record_entry()
-        self.tracked[str(pid)] = {"symbol": sym, "bot": True, "bal_before": bal_before,
-                                  "entry_time": str(pd.Timestamp.now(tz="UTC")), "max_bars": max_bars,
-                                  "strategy": source, "side": side, "init_stop": stop, "stop": stop,
-                                  "target": target,
-                                  "trail_start_r": trail[0] if trail else None,
-                                  "trail_buf": trail[1] if trail else None,
-                                  "spike_pts": spike[0] if spike else None,
-                                  "spike_min_r": spike[1] if spike else None,
-                                  "spike_mode": spike[2] if spike else None,
-                                  "risk_usd": risk_usd}
+        self.tracked[str(pid)] = rec
         self.save()                                    # never lose track of a live order
         self.notify.send(
             f"{'BUY' if side > 0 else 'SELL'} {qty} {sym} @~{price:.2f} SL {stop:.2f} TP {target:.2f}"
@@ -399,10 +430,18 @@ class Runner:
         for p in positions:
             if p.id not in self.tracked and p.tag == BOT_TAG:
                 # the bot's own trade that we lost track of (e.g. fill shown late, restart)
-                self.tracked[p.id] = {"symbol": p.symbol, "bot": True, "bal_before": balance,
-                                      "entry_time": str(p.opened or pd.Timestamp.now(tz="UTC")),
-                                      "max_bars": None, "strategy": "recovered"}
-                self.notify.send(f"Re-attached bot position {p.symbol} {p.qty} lots.")
+                late = self._pending_for(p.symbol)
+                if late is not None and int(late.get("side", 0)) == p.side:
+                    self.pending.pop(p.symbol, None)
+                    self.tracked[p.id] = {k: v for k, v in late.items() if k != "sent"}
+                    self.rm.record_entry()
+                    self.notify.send(f"Order confirmed late: {p.symbol} {p.qty} lots ({late['strategy']}), "
+                                     f"now tracked with its own stop and trailing.")
+                else:
+                    self.tracked[p.id] = {"symbol": p.symbol, "bot": True, "bal_before": balance,
+                                          "entry_time": str(p.opened or pd.Timestamp.now(tz="UTC")),
+                                          "max_bars": None, "strategy": "recovered"}
+                    self.notify.send(f"Re-attached bot position {p.symbol} {p.qty} lots.")
         for p in positions:
             if not p.has_stop and self.cfg.risk.guardian_auto_stop:
                 age = (pd.Timestamp(local) - p.opened).total_seconds() if p.opened is not None else None
