@@ -184,6 +184,21 @@ strategies:
     history_bars: 600
     params: {patterns: symmetrical_triangle, hours: "08:00-11:00"}
 
+  # EVENING ONLY (Ricardo, 2026-11-13): session sweep reversal. The NY day session's (08:00-17:00)
+  # high or low is swept, the 4H trend points the other way, a 15m candle breaks the last swing
+  # before the sweep -> enter; stop beyond the sweep; half off at +1R, stop to breakeven, trail the
+  # rest on 15m candles. research/session_sweep_study.py: 15 trades in 3.7 yrs, 67% wins, +6.8R
+  # (trailing only: +8.8R) - far below the 100-trade bar and the profit is all in the newer half:
+  # demo forward-test only. Nothing else trades 20:00-24:00.
+  - name: session_sweep
+    label: session_sweep_evening
+    instruments: [XAUUSD.R]
+    timeframe: 15m
+    history_bars: 1200              # ~12 days of 15m: warms up the 4H EMA-50
+    params: {ref_session: "08:00-17:00", bias: "4h", confirm: "choch", hours: "20:00-24:00"}
+    partial: {at_r: 1.0, fraction: 0.5, breakeven: true}
+    trail_own_tf: true
+
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
   # The account-ID allowlist keeps the bot on the intended account.
