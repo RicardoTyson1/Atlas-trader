@@ -50,7 +50,10 @@ class SessionSweep(Strategy):
         "trail_start_r": 1.0,
         "trail_buf_atr": 0.3,
         "hours": "20:00-24:00",
-    }
+        "mode": "reversal",          # "retest": the sweep FAILS (a candle closes beyond the level) ->
+        "retest_wait": 24,           #   wait up to this many candles for price to come back to the
+        "retest_tol_atr": 0.3,       #   level (within tol x ATR) and close on the breakout side ->
+    }                                #   enter WITH the breakout, if the 1H/4H trend agrees
 
     def generate(self, df: pd.DataFrame) -> pd.DataFrame:
         out = self._empty(df.index)
@@ -58,6 +61,8 @@ class SessionSweep(Strategy):
         if len(df) < 200:
             return out
         p = self.p
+        if p["mode"] == "retest":
+            return self._retest(df, out)
         if p["confirm"] not in ("close_inside", "choch") or p["bias"] not in ("1h", "4h", "both", "none"):
             raise ValueError("session_sweep: confirm must be close_inside|choch, bias 1h|4h|both|none")
         o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
@@ -142,3 +147,114 @@ class SessionSweep(Strategy):
         out = self._finalize(out, df["close"])
         on = out["signal"].to_numpy() != 0
         return exit_columns(out, on, float(p["trail_start_r"]), p["trail_buf_atr"] * a)
+
+
+    def _retest(self, df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
+        """Break of the session high/low that HOLDS: the broken level is retested as new
+        support (long) / resistance (short) and price closes back on the breakout side."""
+        p = self.p
+        o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+        a = atr(df, int(p["atr_period"])).to_numpy()
+        n = len(df)
+        ctx = sweep_context(df, self.session.timezone, p["ref_session"], p["bias"], int(p["bias_ema"]))
+        lvl_hi, lvl_lo, bias = ctx["lvl_hi"], ctx["lvl_lo"], ctx["bias"]
+        ok_h = hours_mask(df.index, self.session.timezone, p["hours"])
+        sig = np.zeros(n, int)
+        stop = np.full(n, np.nan)
+        used = set()                     # (level value, side) already traded or spent
+        st = None                        # dict(side, lvl, i_break)
+        for i in range(1, n):
+            ai = a[i]
+            if np.isnan(ai) or np.isnan(lvl_hi[i]):
+                st = None
+                continue
+            if st is not None and st["lvl"] not in (lvl_hi[i], lvl_lo[i]):
+                st = None                # a new session replaced the levels
+            if st is None:
+                for side, lvl in ((1, lvl_hi[i]), (-1, lvl_lo[i])):
+                    if (lvl, side) in used:
+                        continue
+                    if side * (c[i] - lvl) > 0:              # closed beyond the level: a break
+                        used.add((lvl, side))
+                        if p["bias"] == "none" or side * bias[i] > 0:   # the trend favors the break
+                            st = {"side": side, "lvl": lvl, "i": i}
+                        break
+                continue
+            s, lvl = st["side"], st["lvl"]
+            if i - st["i"] > int(p["retest_wait"]):
+                st = None
+                continue
+            tol = p["retest_tol_atr"] * ai
+            if s * (c[i] - lvl) < -tol:                     # closed back through: the break failed
+                st = None
+                continue
+            touched = (l[i] <= lvl + tol) if s == 1 else (h[i] >= lvl - tol)
+            if touched and s * (c[i] - lvl) > 0 and s * (c[i] - o[i]) > 0:   # held, closed our way
+                ext = min(l[i], lvl) if s == 1 else max(h[i], lvl)
+                stp = ext - s * p["stop_buffer_atr"] * ai
+                risk = s * (c[i] - stp)
+                if ok_h[i] and 0 < risk <= p["max_stop_atr"] * ai:
+                    sig[i], stop[i] = s, stp
+                st = None
+        out["signal"], out["stop"] = sig, stop
+        out["rr"] = np.where(sig != 0, 1000.0, np.nan)
+        out = self._finalize(out, df["close"])
+        on = out["signal"].to_numpy() != 0
+        return exit_columns(out, on, float(p["trail_start_r"]), p["trail_buf_atr"] * a)
+
+
+def sweep_context(df: pd.DataFrame, tz: str, ref_session: str, bias: str = "both", bias_ema: int = 50) -> dict:
+    """Per-bar context for gating OTHER strategies with the session-sweep idea (no look-ahead).
+
+    lvl_hi / lvl_lo : last COMPLETED reference session's high / low (NaN until one completes)
+    swept_hi / lo   : that high / low has been traded through since the session completed
+    bias            : +1 / -1 / 0 from the 1H / 4H / both-agree EMA trend (NaN = "none")
+    """
+    n = len(df)
+    h, l = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    in_ref = hours_mask(df.index, tz, ref_session)
+    dt = df.index.to_series().diff().fillna(pd.Timedelta(0)).to_numpy()
+    gap = np.timedelta64(2, "h")
+    lvl_hi = np.full(n, np.nan)
+    lvl_lo = np.full(n, np.nan)
+    s_hi = np.zeros(n, bool)
+    s_lo = np.zeros(n, bool)
+    run_hi = run_lo = cur_hi = cur_lo = np.nan
+    hit_hi = hit_lo = False
+    for i in range(n):
+        if in_ref[i]:
+            if np.isnan(run_hi) or dt[i] > gap:
+                run_hi, run_lo = h[i], l[i]
+            else:
+                run_hi, run_lo = max(run_hi, h[i]), min(run_lo, l[i])
+            cur_hi = cur_lo = np.nan                    # levels are refreshed when this run ends
+            hit_hi = hit_lo = False
+        else:
+            if not np.isnan(run_hi):
+                cur_hi, cur_lo = run_hi, run_lo
+                run_hi = run_lo = np.nan
+                hit_hi = hit_lo = False
+            if not np.isnan(cur_hi):
+                hit_hi = hit_hi or h[i] > cur_hi
+                hit_lo = hit_lo or l[i] < cur_lo
+        lvl_hi[i], lvl_lo[i], s_hi[i], s_lo[i] = cur_hi, cur_lo, hit_hi, hit_lo
+    if bias == "none":
+        b = np.full(n, np.nan)
+    else:
+        b1 = _htf_bias(df, "1h", bias_ema) if bias in ("1h", "both") else None
+        b4 = _htf_bias(df, "4h", bias_ema) if bias in ("4h", "both") else None
+        b = b1 if bias == "1h" else b4 if bias == "4h" else np.where(b1 == b4, b1, 0)
+    return {"lvl_hi": lvl_hi, "lvl_lo": lvl_lo, "swept_hi": s_hi, "swept_lo": s_lo, "bias": b}
+
+
+def sweep_gate(df: pd.DataFrame, sig: np.ndarray, ctx: dict, inside: bool) -> np.ndarray:
+    """Keep a short only after the session HIGH was swept with a down bias (long: low + up bias).
+    `inside`: the signal candle must also have closed back inside the swept range."""
+    c = df["close"].to_numpy(float)
+    b = ctx["bias"]
+    short_ok = ctx["swept_hi"] & ~(b >= 0)
+    long_ok = ctx["swept_lo"] & ~(b <= 0)
+    if inside:
+        short_ok &= c < ctx["lvl_hi"]
+        long_ok &= c > ctx["lvl_lo"]
+    return np.where(((sig == -1) & short_ok) | ((sig == 1) & long_ok), sig, 0)
