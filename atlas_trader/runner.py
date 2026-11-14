@@ -300,7 +300,8 @@ class Runner:
                "spike_pts": spike[0] if spike else None,
                "spike_min_r": spike[1] if spike else None,
                "spike_mode": spike[2] if spike else None,
-               "risk_usd": risk_usd}
+               "risk_usd": risk_usd,
+               "partial": self._partial_rule(source)}
         try:
             pid = self.broker.market_bracket(sym, side, qty, stop, target)
         except Exception as e:
@@ -602,6 +603,9 @@ class Runner:
             self._close_verified([pid])
             self.notify.send(f"Strategy exit {sym} ({spec.id}).")
             return "exit:signal"
+        done = self._partial_exit(pid, t, pos, sym)
+        if done:
+            return done
         # outside core hours every trade trails on 1-minute candles (Ricardo, 2026-11-05)
         trail_bars = bars
         local = now.tz_convert(self.cfg.session.tz)
@@ -610,6 +614,54 @@ class Runner:
             if not b1.empty:
                 trail_bars = b1
         return self._trail(pid, t, pos, sym, trail_bars)
+
+    def _partial_rule(self, source: str) -> dict | None:
+        spec = next((x for x in self.cfg.strategies if x.id == source), None)
+        return dict(spec.partial) if spec is not None and spec.partial else None
+
+    def _partial_exit(self, pid: str, t: dict, pos, sym: str) -> str | None:
+        """Bank part of the trade at +at_r R, then (optionally) move the rest's stop to breakeven.
+        Research: research/exit_options_study.py (reversal 1m, 08-11: 76% wins, +12.3R vs +9.6R)."""
+        rule = t.get("partial")
+        if not rule or t.get("partial_done"):
+            return None
+        init_stop = float(t["init_stop"])
+        risk_pts = abs(pos.entry - init_stop)
+        if risk_pts <= 0:
+            return None
+        bid, ask = self.broker.quote(sym)
+        px = bid if pos.side > 0 else ask              # the price we would get closing now
+        if pos.side * (px - pos.entry) < float(rule.get("at_r", 0.5)) * risk_pts:
+            return None
+        inst = self.cfg.instrument(sym)
+        step = inst.lot_step or 0.01
+        qty = int(pos.qty * float(rule.get("fraction", 0.5)) / step + 1e-9) * step
+        qty = round(qty, 8)
+        total = float(pos.qty)
+        t["partial_done"] = True                       # one attempt per trade, never repeat
+        self.save()
+        msg = []
+        if qty >= inst.min_lot and total - qty >= inst.min_lot - 1e-9:
+            try:
+                self.broker.close_partial(pid, qty)
+                msg.append(f"Banked {qty:g} of {total:g} lots on {sym} at {px:.2f} "
+                           f"(+{float(rule.get('at_r', 0.5)):g}R)")
+            except Exception as e:
+                self._alert_once(f"partialfail:{pid}", f"Could not close part of {sym} ({e!r}); "
+                                 f"the whole trade stays open with its stop.", logging.ERROR)
+                return None
+        else:
+            msg.append(f"{sym} reached +{float(rule.get('at_r', 0.5)):g}R but {total:g} lots is too small to split")
+        if rule.get("breakeven", True) and pos.side * (pos.entry - float(t["stop"])) > 0:
+            if self.broker.modify_stop(pid, pos.entry, t.get("target")):
+                t["stop"] = pos.entry
+                msg.append("stop moved to breakeven")
+            else:
+                self._alert_once(f"befail:{pid}", f"Could not move {sym} stop to breakeven; the previous "
+                                 f"stop ({float(t['stop']):.2f}) is still in place.", logging.ERROR)
+        self.save()
+        self.notify.send("; ".join(msg) + ".")
+        return "partial"
 
     def _trail(self, pid: str, t: dict, pos, sym: str, bars: pd.DataFrame) -> str | None:
         """Candle trailing stop on the live trade (same rule as the backtester).

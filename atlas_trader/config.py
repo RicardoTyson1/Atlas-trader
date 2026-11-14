@@ -110,6 +110,10 @@ class StrategySpec:
     history_bars: int = 600   # bars fetched each cycle in live trading
     params: dict[str, Any] = field(default_factory=dict)
     label: str | None = None  # unique name when the same strategy runs twice (e.g. 5m and 1m)
+    # Partial exit: {"at_r": 0.5, "fraction": 0.5, "breakeven": true} closes `fraction` of the
+    # position once open profit reaches `at_r` x initial risk, then (optionally) moves the stop on
+    # the rest to the entry price. None = off.
+    partial: dict[str, Any] | None = None
 
     @property
     def id(self) -> str:
