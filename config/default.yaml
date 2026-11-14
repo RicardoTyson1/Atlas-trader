@@ -36,7 +36,7 @@ risk:
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
-  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (strategies enter 08-11 and 20-24 NY)
+  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (no strategy enters outside 08-11 for now)
   min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
   max_spread_mult: 3.0            # skip an entry when the live spread is over 3x normal (news spikes, rollover)
 
@@ -121,7 +121,7 @@ strategies:
     params:
       sweep_bars: 24
       reward_risk: 0.0
-      hours: "08:00-11:00,20:00-24:00"
+      hours: "08:00-11:00"
   # st_confluence = SuperTrend(10,3) trend + MACD agrees + above-average volume, pullback to the
   # SuperTrend line -> entry; stop beyond the line; trail from +1R; SuperTrend flip exits.
   # Study: n=113, 42.5% wins, +0.054R/trade, t=0.46 (A +0.069, B +0.038) - a marginal pass.
@@ -132,7 +132,7 @@ strategies:
     params:
       st_mult: 3.0
       vol_mult: 0.0
-      hours: "08:00-11:00,20:00-24:00"
+      hours: "08:00-11:00"
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
@@ -146,7 +146,7 @@ strategies:
       trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
       trail_buf_atr: 0.3
       spike_atr: 2.0
-      hours: "08:00-11:00,20:00-24:00"  # 08-11 + 20-24 (2026-11-13). All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
+      hours: "08:00-11:00"          # 08-11 only. All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
                                     # -$580 (backtest: -210R / +111R per half vs +43R / +120R at 08-11).
       max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
       max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
@@ -159,8 +159,9 @@ strategies:
   # smc_ob + momentum_rsi are the best-evidenced (270 / 615 backtested trades at 08-11); bb_reversion
   # stays OFF (one lucky +$232 win, but -34R over 686 backtested trades at 08-11); triangle is on
   # probation (weakest pass, 0 for 3 live) and is the first to cut if it keeps losing.
-  # 2026-11-13 (Ricardo): evening window 20:00-24:00 NY added to every strategy, alongside 08-11.
-  # Not yet tested on its own: research/exit_options_study.py reports it.
+  # 2026-11-13: evening window 20:00-24:00 on every strategy was tested (-101R, research/
+  # exit_options_study.py) and removed. Plan (Ricardo): 20-24 = smc_ob only, half off at +1R, stop to
+  # breakeven, trail the rest - deployed only after its own backtest.
   # ======================================================================================
   # Re-test 2026-11-09 (research/full_retest_study.py, 3.7 yrs 5m / 13 mo 1m, real costs):
   # of every setup re-added that day, ONLY these two passed (positive in both halves, >= 100
@@ -172,7 +173,7 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 1m
     history_bars: 600
-    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00,20:00-24:00"}
+    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00"}
     # "Merge B" exit (Ricardo, 2026-11-13): bank half at +0.5R, stop on the rest to breakeven.
     # research/exit_options_study.py, 08-11: 76.4% wins, +12.3R vs 68.3% / +9.6R with the plain exit.
     partial: {at_r: 0.5, fraction: 0.5, breakeven: true}
@@ -181,7 +182,7 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 5m
     history_bars: 600
-    params: {patterns: symmetrical_triangle, hours: "08:00-11:00,20:00-24:00"}
+    params: {patterns: symmetrical_triangle, hours: "08:00-11:00"}
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
