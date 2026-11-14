@@ -173,6 +173,9 @@ strategies:
     timeframe: 1m
     history_bars: 600
     params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00,20:00-24:00"}
+    # "Merge B" exit (Ricardo, 2026-11-13): bank half at +0.5R, stop on the rest to breakeven.
+    # research/exit_options_study.py, 08-11: 76.4% wins, +12.3R vs 68.3% / +9.6R with the plain exit.
+    partial: {at_r: 0.5, fraction: 0.5, breakeven: true}
   - name: chart_patterns            # symmetrical triangle only: 153 trades, 39.2% wins, +0.024R
     label: symmetrical_triangle     # (A +0.040, B +0.008), t 0.2 - a marginal pass, first to cut
     instruments: [XAUUSD.R]
