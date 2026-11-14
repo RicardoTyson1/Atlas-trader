@@ -53,7 +53,16 @@ class SessionSweep(Strategy):
         "mode": "reversal",          # "retest": the sweep FAILS (a candle closes beyond the level) ->
         "retest_wait": 24,           #   wait up to this many candles for price to come back to the
         "retest_tol_atr": 0.3,       #   level (within tol x ATR) and close on the breakout side ->
-    }                                #   enter WITH the breakout, if the 1H/4H trend agrees
+                                     #   enter WITH the breakout, if the 1H/4H trend agrees
+        # --- refinements (all OFF by default = the original rules), research/sweep_improve_study.py
+        "extra_levels": "",          # more levels, "+"-joined: "prevday" (previous gold day, 18:00
+                                     #   roll) and/or session windows like "02:00-08:00"
+        "break_body_atr": 0.0,       # retest: the break candle's body must be >= this x ATR
+        "break_close_atr": 0.0,      # retest: the break candle must close >= this x ATR past the level
+        "first_touch_only": False,   # retest: the FIRST touch of the level decides (no second chances)
+        "wick_frac": 0.0,            # retest: the retest candle's wick into the level >= this x its range
+        "stop_mode": "candle",       # retest: "candle" = past the retest candle / level, "level" = just
+    }                                #   past the level (tighter: more R per point)
 
     def generate(self, df: pd.DataFrame) -> pd.DataFrame:
         out = self._empty(df.index)
@@ -142,12 +151,69 @@ class SessionSweep(Strategy):
             if ok_h[i] and 0 < risk <= p["max_stop_atr"] * ai:
                 sig[i], stop[i] = s, stp
             st = None
+        for hi_, lo_ in self._extra_level_arrays(df):
+            sig2, stop2 = self._reversal_on(df, hi_, lo_, bias, ok_h, a)
+            add = (sig == 0) & (sig2 != 0)
+            sig[add], stop[add] = sig2[add], stop2[add]
         out["signal"], out["stop"] = sig, stop
         out["rr"] = np.where(sig != 0, 1000.0, np.nan)      # trail only
         out = self._finalize(out, df["close"])
         on = out["signal"].to_numpy() != 0
         return exit_columns(out, on, float(p["trail_start_r"]), p["trail_buf_atr"] * a)
 
+
+    def _extra_level_arrays(self, df: pd.DataFrame) -> list:
+        return [level_arrays(df, self.session.timezone, spec)
+                for spec in str(self.p["extra_levels"]).split("+") if spec.strip()]
+
+    def _reversal_on(self, df, lvl_hi, lvl_lo, bias, ok_h, a):
+        """The reversal rules on per-bar level arrays (levels change -> both sides re-armed)."""
+        p = self.p
+        h, l, c = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+        n = len(df)
+        sig = np.zeros(n, int)
+        stop = np.full(n, np.nan)
+        sb = int(p["swing_bars"])
+        used_hi = used_lo = True
+        prev = (np.nan, np.nan)
+        st = None
+        for i in range(n):
+            cur = (lvl_hi[i], lvl_lo[i])
+            if np.isnan(cur[0]):
+                st, prev = None, cur
+                continue
+            if cur != prev:
+                used_hi = used_lo = False
+                st, prev = None, cur
+            if np.isnan(a[i]):
+                continue
+            if st is None:
+                if not used_hi and h[i] > cur[0] and not bias[i] >= 0:
+                    used_hi = True
+                    st = {"side": -1, "ext": h[i], "i": i, "lvl": cur[0], "swing": l[max(0, i - sb):i].min() if i else l[i]}
+                elif not used_lo and l[i] < cur[1] and not bias[i] <= 0:
+                    used_lo = True
+                    st = {"side": 1, "ext": l[i], "i": i, "lvl": cur[1], "swing": h[max(0, i - sb):i].max() if i else h[i]}
+                else:
+                    used_hi = used_hi or h[i] > cur[0]
+                    used_lo = used_lo or l[i] < cur[1]
+                    continue
+            s = st["side"]
+            if (s == -1 and h[i] > st["ext"]) or (s == 1 and l[i] < st["ext"]):
+                st["ext"] = h[i] if s == -1 else l[i]
+                st["swing"] = l[max(0, i - sb):i].min() if s == -1 else h[max(0, i - sb):i].max()
+            if i - st["i"] > int(p["max_wait"]):
+                st = None
+                continue
+            ref = st["lvl"] if p["confirm"] == "close_inside" else st["swing"]
+            if not (c[i] < ref if s == -1 else c[i] > ref):
+                continue
+            stp = st["ext"] - s * p["stop_buffer_atr"] * a[i]
+            risk = s * (c[i] - stp)
+            if ok_h[i] and 0 < risk <= p["max_stop_atr"] * a[i]:
+                sig[i], stop[i] = s, stp
+            st = None
+        return sig, stop
 
     def _retest(self, df: pd.DataFrame, out: pd.DataFrame) -> pd.DataFrame:
         """Break of the session high/low that HOLDS: the broken level is retested as new
@@ -157,8 +223,24 @@ class SessionSweep(Strategy):
         a = atr(df, int(p["atr_period"])).to_numpy()
         n = len(df)
         ctx = sweep_context(df, self.session.timezone, p["ref_session"], p["bias"], int(p["bias_ema"]))
-        lvl_hi, lvl_lo, bias = ctx["lvl_hi"], ctx["lvl_lo"], ctx["bias"]
+        bias = ctx["bias"]
         ok_h = hours_mask(df.index, self.session.timezone, p["hours"])
+        sig = np.zeros(n, int)
+        stop = np.full(n, np.nan)
+        for lvl_hi, lvl_lo in [(ctx["lvl_hi"], ctx["lvl_lo"])] + self._extra_level_arrays(df):
+            s2, st2 = self._retest_on(o, h, l, c, a, lvl_hi, lvl_lo, bias, ok_h)
+            add = (sig == 0) & (s2 != 0)
+            sig[add], stop[add] = s2[add], st2[add]
+        out["signal"], out["stop"] = sig, stop
+        out["rr"] = np.where(sig != 0, 1000.0, np.nan)
+        out = self._finalize(out, df["close"])
+        on = out["signal"].to_numpy() != 0
+        return exit_columns(out, on, float(p["trail_start_r"]), p["trail_buf_atr"] * a)
+
+
+    def _retest_on(self, o, h, l, c, a, lvl_hi, lvl_lo, bias, ok_h):
+        p = self.p
+        n = len(c)
         sig = np.zeros(n, int)
         stop = np.full(n, np.nan)
         used = set()                     # (level value, side) already traded or spent
@@ -169,14 +251,16 @@ class SessionSweep(Strategy):
                 st = None
                 continue
             if st is not None and st["lvl"] not in (lvl_hi[i], lvl_lo[i]):
-                st = None                # a new session replaced the levels
+                st = None                # new levels replaced these
             if st is None:
                 for side, lvl in ((1, lvl_hi[i]), (-1, lvl_lo[i])):
                     if (lvl, side) in used:
                         continue
                     if side * (c[i] - lvl) > 0:              # closed beyond the level: a break
                         used.add((lvl, side))
-                        if p["bias"] == "none" or side * bias[i] > 0:   # the trend favors the break
+                        strong = (side * (c[i] - o[i]) >= p["break_body_atr"] * ai
+                                  and side * (c[i] - lvl) >= p["break_close_atr"] * ai)
+                        if strong and (p["bias"] == "none" or side * bias[i] > 0):
                             st = {"side": side, "lvl": lvl, "i": i}
                         break
                 continue
@@ -189,18 +273,39 @@ class SessionSweep(Strategy):
                 st = None
                 continue
             touched = (l[i] <= lvl + tol) if s == 1 else (h[i] >= lvl - tol)
-            if touched and s * (c[i] - lvl) > 0 and s * (c[i] - o[i]) > 0:   # held, closed our way
-                ext = min(l[i], lvl) if s == 1 else max(h[i], lvl)
-                stp = ext - s * p["stop_buffer_atr"] * ai
+            if not touched:
+                continue
+            rng = h[i] - l[i]
+            wick = (min(o[i], c[i]) - l[i]) if s == 1 else (h[i] - max(o[i], c[i]))
+            good = (s * (c[i] - lvl) > 0 and s * (c[i] - o[i]) > 0
+                    and (p["wick_frac"] <= 0 or (rng > 0 and wick >= p["wick_frac"] * rng)))
+            if good:
+                if p["stop_mode"] == "level":
+                    stp = lvl - s * p["stop_buffer_atr"] * ai
+                else:
+                    ext = min(l[i], lvl) if s == 1 else max(h[i], lvl)
+                    stp = ext - s * p["stop_buffer_atr"] * ai
                 risk = s * (c[i] - stp)
                 if ok_h[i] and 0 < risk <= p["max_stop_atr"] * ai:
                     sig[i], stop[i] = s, stp
                 st = None
-        out["signal"], out["stop"] = sig, stop
-        out["rr"] = np.where(sig != 0, 1000.0, np.nan)
-        out = self._finalize(out, df["close"])
-        on = out["signal"].to_numpy() != 0
-        return exit_columns(out, on, float(p["trail_start_r"]), p["trail_buf_atr"] * a)
+            elif p["first_touch_only"]:
+                st = None
+        return sig, stop
+
+
+def level_arrays(df: pd.DataFrame, tz: str, spec: str):
+    """(high, low) per bar for one level source: "prevday" = previous gold trading day (the day
+    rolls at 18:00 NY), else a session window -> its last completed run (sweep_context)."""
+    spec = spec.strip()
+    if spec == "prevday":
+        day = (df.index.tz_convert(tz) + pd.Timedelta(hours=6)).date
+        g = pd.DataFrame({"h": df["high"].to_numpy(), "l": df["low"].to_numpy(), "d": day})
+        daily = g.groupby("d").agg(h=("h", "max"), l=("l", "min"))
+        prev = daily.shift(1)
+        return prev["h"].reindex(day).to_numpy(float), prev["l"].reindex(day).to_numpy(float)
+    ctx = sweep_context(df, tz, spec, "none")
+    return ctx["lvl_hi"], ctx["lvl_lo"]
 
 
 def sweep_context(df: pd.DataFrame, tz: str, ref_session: str, bias: str = "both", bias_ema: int = 50) -> dict:
