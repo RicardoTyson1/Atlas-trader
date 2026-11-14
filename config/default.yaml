@@ -133,10 +133,32 @@ strategies:
       st_mult: 3.0
       vol_mult: 0.0
       hours: "08:00-11:00"
-  # momentum_rsi REMOVED 2026-11-13 (Ricardo): 18 demo trades, 33% wins, -$580. Code kept.
+  # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
+  # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
+  # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
+  - name: momentum_rsi
+    instruments: [XAUUSD.R]
+    timeframe: 5m
+    history_bars: 600
+    params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
+      disp_atr: 1.0
+      trend_filter: true
+      trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
+      trail_buf_atr: 0.3
+      spike_atr: 2.0
+      hours: "08:00-11:00"          # 08-11 only. All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
+                                    # -$580 (backtest: -210R / +111R per half vs +43R / +120R at 08-11).
+      max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
+      max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
+      run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
+                                    # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
   # 2026-11-11 to 11-13 every strategy ran ALL HOURS on the demo: 19 trades, 5 wins, -$791.
   # Back to 08-11 NY on 2026-11-13 (Ricardo), matching the test results below.
+  # 2026-11-13 (Ricardo): briefly swapped momentum_rsi + triangle for bb_reversion, then reversed:
+  # smc_ob + momentum_rsi are the best-evidenced (270 / 615 backtested trades at 08-11); bb_reversion
+  # stays OFF (one lucky +$232 win, but -34R over 686 backtested trades at 08-11); triangle is on
+  # probation (weakest pass, 0 for 3 live) and is the first to cut if it keeps losing.
   # ======================================================================================
   # Re-test 2026-11-09 (research/full_retest_study.py, 3.7 yrs 5m / 13 mo 1m, real costs):
   # of every setup re-added that day, ONLY these two passed (positive in both halves, >= 100
@@ -149,14 +171,12 @@ strategies:
     timeframe: 1m
     history_bars: 600
     params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00"}
-  # symmetrical_triangle REMOVED 2026-11-13 (Ricardo): 3 demo trades, 0 wins, -$267. Code kept.
-  - name: bb_reversion              # fade a 2.5-sigma Bollinger close back to the middle band
-    # ADDED BACK 2026-11-13 (Ricardo) after a +$232 demo win. NOTE: did NOT pass the re-test
-    # (686 trades at 08-11: 35.7% wins, -0.049R, -34R total; all hours -451R). Judge it on the demo.
+  - name: chart_patterns            # symmetrical triangle only: 153 trades, 39.2% wins, +0.024R
+    label: symmetrical_triangle     # (A +0.040, B +0.008), t 0.2 - a marginal pass, first to cut
     instruments: [XAUUSD.R]
     timeframe: 5m
     history_bars: 600
-    params: {hours: "08:00-11:00"}
+    params: {patterns: symmetrical_triangle, hours: "08:00-11:00"}
 
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
