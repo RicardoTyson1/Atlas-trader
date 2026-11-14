@@ -122,17 +122,9 @@ strategies:
       sweep_bars: 24
       reward_risk: 0.0
       hours: "08:00-11:00"
-  # st_confluence = SuperTrend(10,3) trend + MACD agrees + above-average volume, pullback to the
-  # SuperTrend line -> entry; stop beyond the line; trail from +1R; SuperTrend flip exits.
-  # Study: n=113, 42.5% wins, +0.054R/trade, t=0.46 (A +0.069, B +0.038) - a marginal pass.
-  - name: st_confluence
-    instruments: [XAUUSD.R]
-    timeframe: 15m
-    history_bars: 600
-    params:
-      st_mult: 3.0
-      vol_mult: 0.0
-      hours: "08:00-11:00"
+  # st_confluence REMOVED 2026-11-14 (Ricardo: keep only improvements). With full costs it made +1.7R over
+  # 113 trades (35.4% wins, newer half -0.6R) - below the bot's average on both win rate and R, and it
+  # took the one-trade slot from better setups. Code kept (atlas_trader/strategies/st_confluence.py).
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
