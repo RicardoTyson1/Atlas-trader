@@ -498,4 +498,23 @@ def test_live_config_partial_only_on_reversal():
     c = load_config("config/default.yaml")
     rules = {s.id: s.partial for s in c.strategies}
     assert rules["reversal_trail_1m"] == {"at_r": 0.5, "fraction": 0.5, "breakeven": True}
-    assert all(v is None for k, v in rules.items() if k != "reversal_trail_1m")
+    assert rules["session_sweep_evening"] == {"at_r": 1.0, "fraction": 0.5, "breakeven": True}
+    assert all(v is None for k, v in rules.items() if k not in ("reversal_trail_1m", "session_sweep_evening"))
+    ev = next(s for s in c.strategies if s.id == "session_sweep_evening")
+    assert ev.trail_own_tf and ev.params["hours"] == "20:00-24:00" and ev.timeframe == "15m"
+    # nothing else trades the evening
+    assert all("20:00" not in str(s.params.get("hours", "")) for s in c.strategies if s.id != ev.id)
+
+
+def test_no_stale_alert_right_after_daily_reopen(cfg):
+    """2026-11-11 18:05 NY: the 15m strategy had no finished candle since 17:00 -> false alarm."""
+    from atlas_trader.config import StrategySpec
+    from datetime import time as _t
+    cfg.session.reopen = _t(18, 5)
+    cfg.strategies = [StrategySpec(name="st_confluence", instruments=["NAS100"], timeframe="15m")]
+    base, broker, runner = make(cfg, days=2)
+    day1 = base.index[0].tz_convert("America/New_York").normalize()
+    now = (day1 + pd.Timedelta(hours=18, minutes=10)).tz_convert("UTC")
+    broker.set_time(now)
+    runner.step(now)
+    assert not any("No fresh" in m for m in runner.notify.messages)
