@@ -187,7 +187,12 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 5m
     history_bars: 3000              # ~10 days of 5m: warms up the 4H EMA-50
-    params: {mode: retest, bias: "4h", ref_session: "18:00-24:00,00:00-08:00", hours: "08:00-11:00"}
+    # 2026-11-14 (Ricardo): retest candle must be a REJECTION candle (wick into the level >= 40% of its
+    # range). research/sweep_improve_study.py: 108 trades, 34.3% wins, +0.342R/trade (A +0.377 /
+    # B +0.307) vs 30.6% / +0.198R (A +0.355 / B +0.039). Missed the pre-set rule on half-A win rate
+    # (27.8% vs 30.3%): judge it on the demo after ~30 trades.
+    params: {mode: retest, bias: "4h", ref_session: "18:00-24:00,00:00-08:00", hours: "08:00-11:00",
+             wick_frac: 0.4}
 
   # EVENING ONLY (Ricardo, 2026-11-13): session sweep reversal. The NY day session's (08:00-17:00)
   # high or low is swept, the 4H trend points the other way, a 15m candle breaks the last swing
