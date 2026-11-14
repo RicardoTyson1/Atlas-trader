@@ -177,12 +177,17 @@ strategies:
     # "Merge B" exit (Ricardo, 2026-11-13): bank half at +0.5R, stop on the rest to breakeven.
     # research/exit_options_study.py, 08-11: 76.4% wins, +12.3R vs 68.3% / +9.6R with the plain exit.
     partial: {at_r: 0.5, fraction: 0.5, breakeven: true}
-  - name: chart_patterns            # symmetrical triangle only: 153 trades, 39.2% wins, +0.024R
-    label: symmetrical_triangle     # (A +0.040, B +0.008), t 0.2 - a marginal pass, first to cut
+  # symmetrical_triangle REMOVED 2026-11-14 (Ricardo): -6.4R over 151 trades with full costs, 0 for 3 live.
+  # Replaced by the session break-and-retest (research/sweep_gate_study.py, 08-11, 5m, 4H trend, trailing):
+  # 216 trades, 31% wins, +0.198R/trade, +42.8R (half A +0.355R, half B +0.039R - thin recently).
+  # The overnight (18:00-08:00) high/low CLOSES broken and holds -> retest of the level as new
+  # support/resistance -> enter with the breakout if the 4H trend agrees; stop past the level; trail.
+  - name: session_sweep
+    label: session_break_retest
     instruments: [XAUUSD.R]
     timeframe: 5m
-    history_bars: 600
-    params: {patterns: symmetrical_triangle, hours: "08:00-11:00"}
+    history_bars: 3000              # ~10 days of 5m: warms up the 4H EMA-50
+    params: {mode: retest, bias: "4h", ref_session: "18:00-24:00,00:00-08:00", hours: "08:00-11:00"}
 
   # EVENING ONLY (Ricardo, 2026-11-13): session sweep reversal. The NY day session's (08:00-17:00)
   # high or low is swept, the 4H trend points the other way, a 15m candle breaks the last swing
