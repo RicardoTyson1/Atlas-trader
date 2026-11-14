@@ -114,6 +114,9 @@ class StrategySpec:
     # position once open profit reaches `at_r` x initial risk, then (optionally) moves the stop on
     # the rest to the entry price. None = off.
     partial: dict[str, Any] | None = None
+    # True: trail on this strategy's own candles at every hour (as its backtest did), instead of
+    # switching to 1-minute candles outside core hours.
+    trail_own_tf: bool = False
 
     @property
     def id(self) -> str:

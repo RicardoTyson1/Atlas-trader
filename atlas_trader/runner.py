@@ -221,6 +221,11 @@ class Runner:
         if sess.reopen is not None:
             fri_close = local.weekday() == 4 and m >= _mins(sess.flat_by)   # weekend: market shut
             in_window = local.weekday() in sess.weekdays and not sess.in_break(m) and not fri_close
+            # just after the daily reopen the first candle of a slow timeframe is not finished yet
+            # (2026-11-11 18:05: false "no fresh data" alert from the 15m strategy)
+            since_open = (m - _mins(sess.reopen)) % 1440
+            if since_open < 2 * tf / pd.Timedelta(minutes=1) + 5:
+                in_window = False
         else:
             in_window = (local.weekday() in sess.weekdays
                          and _mins(sess.trade_start) <= m <= _mins(sess.last_entry))
@@ -609,7 +614,8 @@ class Runner:
         # outside core hours every trade trails on 1-minute candles (Ricardo, 2026-11-05)
         trail_bars = bars
         local = now.tz_convert(self.cfg.session.tz)
-        if spec.timeframe != "1m" and self.cfg.risk.core_hours and not self.rm.in_core_hours(local.to_pydatetime()):
+        if (spec.timeframe != "1m" and not spec.trail_own_tf and self.cfg.risk.core_hours
+                and not self.rm.in_core_hours(local.to_pydatetime())):
             b1 = self._bars(sym, "1m", 300)
             if not b1.empty:
                 trail_bars = b1
