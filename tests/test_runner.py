@@ -451,3 +451,51 @@ def test_order_error_that_never_fills_frees_the_symbol(cfg):
     runner.pending["NAS100"] = {"symbol": "NAS100", "side": 1, "strategy": "x",
                                 "sent": str(pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=11))}
     assert runner._pending_for("NAS100") is None and not runner.pending
+
+
+def _partial_runner(cfg, rule):
+    from atlas_trader.config import StrategySpec
+    cfg.strategies = [StrategySpec(name="momentum_rsi", instruments=["NAS100"], partial=rule)]
+    base, broker, runner, t = _guard_setup(cfg)
+    px = broker._mark("NAS100")
+    pid = broker.market_bracket("NAS100", 1, 1.0, stop=px - 10, target=px + 100)
+    runner.tracked[pid] = {"symbol": "NAS100", "bot": True, "bal_before": broker.balance, "entry_time": str(t),
+                           "max_bars": None, "strategy": "momentum_rsi", "side": 1, "init_stop": px - 10,
+                           "stop": px - 10, "target": px + 100, "trail_start_r": None, "trail_buf": None,
+                           "spike_pts": None, "spike_min_r": None, "spike_mode": None, "risk_usd": 10.0,
+                           "partial": runner._partial_rule("momentum_rsi")}
+    return broker, runner, pid, px
+
+
+def test_partial_exit_banks_half_and_moves_stop_to_breakeven(cfg):
+    broker, runner, pid, px = _partial_runner(cfg, {"at_r": 0.5, "fraction": 0.5, "breakeven": True})
+    pos = broker.positions()[0]
+    broker.quote = lambda s: (px + 6, px + 6.5)          # +0.6R for a long
+    assert runner._partial_exit(pid, runner.tracked[pid], pos, "NAS100") == "partial"
+    assert broker.positions()[0].qty == 0.5
+    assert broker.positions()[0].stop == pos.entry and runner.tracked[pid]["stop"] == pos.entry
+    assert any("Banked 0.5 of 1 lots" in m and "breakeven" in m for m in runner.notify.messages), runner.notify.messages
+    # never twice
+    assert runner._partial_exit(pid, runner.tracked[pid], broker.positions()[0], "NAS100") is None
+
+
+def test_partial_exit_waits_for_the_level(cfg):
+    broker, runner, pid, px = _partial_runner(cfg, {"at_r": 0.5, "fraction": 0.5, "breakeven": True})
+    broker.quote = lambda s: (px + 4, px + 4.5)          # +0.4R: not yet
+    assert runner._partial_exit(pid, runner.tracked[pid], broker.positions()[0], "NAS100") is None
+    assert broker.positions()[0].qty == 1.0
+
+
+def test_no_partial_rule_means_no_partial(cfg):
+    broker, runner, pid, px = _partial_runner(cfg, None)
+    broker.quote = lambda s: (px + 9, px + 9.5)
+    assert runner.tracked[pid]["partial"] is None
+    assert runner._partial_exit(pid, runner.tracked[pid], broker.positions()[0], "NAS100") is None
+
+
+def test_live_config_partial_only_on_reversal():
+    from atlas_trader.config import load_config
+    c = load_config("config/default.yaml")
+    rules = {s.id: s.partial for s in c.strategies}
+    assert rules["reversal_trail_1m"] == {"at_r": 0.5, "fraction": 0.5, "breakeven": True}
+    assert all(v is None for k, v in rules.items() if k != "reversal_trail_1m")
