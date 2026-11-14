@@ -13,6 +13,8 @@ stop checked before target inside a bar, exactly like the engine):
                 the trade closes where the live one did.
   half1_be    : option 3 - close half at +1R, move the rest's stop to breakeven, the rest then
                 follows the live exit (or is stopped at breakeven first).
+  half0.5     : "merge" (added 2026-11-13) - close half at +0.5R, the rest keeps the live trailing exit.
+  half0.5_be  : same, and the rest's stop moves to breakeven once +0.5R is reached.
 Costs: real spread + slippage on every fill and $7/lot per side, all in R. "Win" = net R > 0.
 Data: GatesFX XAUUSD.R 5m 2023-03 -> 2026-11 (1m 13 months for the 1m reversal), halves A/B at
 the date midpoint.
@@ -50,7 +52,7 @@ MODELS = [
      {"move_atr": 5.0, "rsi_level": 25, "target": "half_move", "spike_atr": 0.0}),
     ("sym_triangle", "chart_patterns", "5m", "5m", {"patterns": "symmetrical_triangle"}),
 ]
-EXITS = ["base", "tp0.5", "tp1", "half1_be"]
+EXITS = ["base", "tp0.5", "tp1", "half1_be", "half0.5", "half0.5_be"]
 DATA: dict = {}
 
 
@@ -100,22 +102,23 @@ def replay(df, t, inst, mode) -> float:
             if (h[i] >= tgt) if side == 1 else (l[i] <= tgt):
                 return r_of(tgt - side * half) - comm_r
         return r_of(base_fill) - comm_r
-    # half1_be: half at +1R, rest stop -> entry, rest otherwise follows the live exit
-    one = entry + side * risk
+    # halfK[_be]: close half at +K R; the rest follows the live exit (trailing etc.).
+    #   "_be": the rest's stop also moves to breakeven once +K R is reached.
+    k = float(mode[4:].split("_")[0])
+    be = mode.endswith("_be")
+    lvl = entry + side * k * risk
     hit = None
     for i in range(i0, j + 1):
-        if (l[i] <= stop0) if side == 1 else (h[i] >= stop0):
-            if hit is None:
-                return r_of(base_fill) - comm_r       # stopped before +1R: same as live
-        if hit is None and ((h[i] >= one) if side == 1 else (l[i] <= one)):
+        if hit is None and ((l[i] <= stop0) if side == 1 else (h[i] >= stop0)):
+            return r_of(base_fill) - comm_r           # stopped before +K R: same as live
+        if hit is None and ((h[i] >= lvl) if side == 1 else (l[i] <= lvl)):
             hit = i
             continue
-        if hit is not None and ((l[i] <= entry) if side == 1 else (h[i] >= entry)):
-            if i < j:
-                return 0.5 * r_of(one - side * half) + 0.5 * r_of(entry - side * half) - comm_r
+        if be and hit is not None and i < j and ((l[i] <= entry) if side == 1 else (h[i] >= entry)):
+            return 0.5 * r_of(lvl - side * half) + 0.5 * r_of(entry - side * half) - comm_r
     if hit is None:
         return r_of(base_fill) - comm_r
-    return 0.5 * r_of(one - side * half) + 0.5 * r_of(base_fill) - comm_r
+    return 0.5 * r_of(lvl - side * half) + 0.5 * r_of(base_fill) - comm_r
 
 
 def run(job):
@@ -134,6 +137,9 @@ def run(job):
 
 
 def main(path5, path1):
+    if len(sys.argv) > 3:                             # optional: only some windows, e.g. "08-11"
+        for k in [w for w in WINDOWS if w not in sys.argv[3].split(",")]:
+            WINDOWS.pop(k)
     for key, path in (("5m", path5), ("1m", path1)):
         base = load_csv(path)
         mid = base.index[0] + (base.index[-1] - base.index[0]) / 2
@@ -170,7 +176,7 @@ def main(path5, path1):
         r.exit != "base" and r.A_totR >= base.loc[(r.model, r.window), "A_totR"]
         and r.B_totR >= base.loc[(r.model, r.window), "B_totR"] for r in t.itertuples()]
     t["window_PASS"] = (t.A_totR > 0) & (t.B_totR > 0) & (t.n >= 100)
-    t.to_csv("research/exit_options_results.csv", index=False)
+    t.to_csv("research/exit_options_results%s.csv" % ("" if len(WINDOWS) == 3 else "_" + "_".join(WINDOWS)), index=False)
     pd.set_option("display.width", 200)
     print(t.to_string(index=False))
 
