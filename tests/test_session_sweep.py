@@ -108,3 +108,36 @@ def test_retest_mode_needs_bias_in_breakout_direction(cfg):
     p = {**P, "mode": "retest", "retest_tol_atr": 0.5, "bias": "1h"}
     out = build_strategy("session_sweep", cfg.session, p).generate(bars([(200, 2100), (20, 1970)] + RETEST[1:]))
     assert (out.signal == 1).sum() == 0
+
+
+def _walk(days=30, seed=7):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2025-01-05 23:00", periods=days * 24 * 12, freq="5min", tz="UTC")
+    idx = idx[idx.tz_convert("America/New_York").dayofweek < 5]
+    c = 2000 + np.cumsum(rng.normal(0, 0.8, len(idx)))
+    o = np.r_[c[0], c[:-1]]
+    return pd.DataFrame({"open": o, "high": np.maximum(o, c) + 0.3, "low": np.minimum(o, c) - 0.3,
+                         "close": c, "volume": 1.0}, index=idx)
+
+
+def test_array_reversal_matches_session_loop(cfg):
+    """The per-level-array path used for extra levels reproduces the original session loop."""
+    df = _walk()
+    p = {**P, "bias": "none", "confirm": "close_inside", "hours": "00:00-24:00"}
+    base = build_strategy("session_sweep", cfg.session, p).generate(df)
+    dup = build_strategy("session_sweep", cfg.session, {**p, "extra_levels": "08:00-17:00"}).generate(df)
+    assert (base.signal != 0).sum() > 5
+    assert (base.signal.values == dup.signal.values).all()
+
+
+def test_refinements_no_lookahead(cfg):
+    df = _walk(12, seed=3)
+    s = build_strategy("session_sweep", cfg.session, {
+        "mode": "retest", "bias": "none", "ref_session": "18:00-24:00,00:00-08:00", "hours": "00:00-24:00",
+        "extra_levels": "prevday+02:00-08:00", "stop_mode": "level", "wick_frac": 0.2,
+        "first_touch_only": True, "break_body_atr": 0.3})
+    full = s.generate(df)
+    for cut in range(400, len(df), 97):
+        part = s.generate(df.iloc[:cut])
+        assert (part.signal.values == full.signal.values[:cut]).all(), cut
+        np.testing.assert_allclose(part.stop.values, full.stop.values[:cut], equal_nan=True)
