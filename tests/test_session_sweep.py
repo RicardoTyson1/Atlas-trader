@@ -60,3 +60,51 @@ def test_no_lookahead(cfg):
         part = s.generate(df.iloc[:cut])
         assert (part.signal.values == full.signal.values[:cut]).all(), cut
         np.testing.assert_allclose(part.stop.values, full.stop.values[:cut], equal_nan=True)
+
+
+def test_sweep_gate_keeps_only_matching_side():
+    from atlas_trader.strategies.session_sweep import sweep_context, sweep_gate
+    df = bars(LEGS)
+    ctx = sweep_context(df, "America/New_York", "08:00-17:00", "none")
+    loc = df.index.tz_convert("America/New_York")
+    hm = np.asarray(loc.strftime("%H:%M"))
+    after = (hm >= "20:45") & (hm <= "21:30")     # before the later drop under the session low
+    before = (hm > "17:00") & (hm < "20:40")
+    assert ctx["swept_hi"][after].all() and not ctx["swept_hi"][before].any()
+    assert not ctx["swept_lo"][after].any()
+    sig = np.zeros(len(df), int)
+    sig[after] = -1
+    assert (sweep_gate(df, sig, ctx, inside=False)[after] == -1).all()     # short after a high sweep: kept
+    sig[after] = 1
+    assert (sweep_gate(df, sig, ctx, inside=False) == 0).all()             # long without a low sweep: dropped
+
+
+def test_sweep_context_no_lookahead():
+    from atlas_trader.strategies.session_sweep import sweep_context
+    df = bars(LEGS + [(30, 1990), (30, 1950)])
+    full = sweep_context(df, "America/New_York", "08:00-17:00", "both")
+    for cut in range(210, len(df), 13):
+        part = sweep_context(df.iloc[:cut], "America/New_York", "08:00-17:00", "both")
+        for k in ("lvl_hi", "lvl_lo", "swept_hi", "swept_lo", "bias"):
+            np.testing.assert_array_equal(part[k], full[k][:cut])
+
+
+# NY session 08:00-17:00 tops at ~1980; at 20:30 price breaks out and CLOSES above, pulls back to
+# 1980 (new support), then rallies -> long on the retest candle.
+RETEST = ([(96, 1960)] + [(18, 1980), (18, 1962), (18, 1979), (18, 1963), (18, 1975), (18, 1966)]
+          + [(42, 1972)] + [(3, 1986), (4, 1980.3), (1, 1982), (20, 1995)])
+
+
+def test_retest_mode_goes_long_after_break_and_retest(cfg):
+    p = {**P, "mode": "retest", "retest_tol_atr": 0.5}
+    out = build_strategy("session_sweep", cfg.session, p).generate(bars(RETEST))
+    hits = out[out.signal != 0]
+    assert len(hits) == 1 and hits.signal.iloc[0] == 1
+    assert hits.stop.iloc[0] < 1980.2                    # stop under the retested level
+
+
+def test_retest_mode_needs_bias_in_breakout_direction(cfg):
+    # the opening down-leg makes the 1H trend down: an upside break is not the favored direction
+    p = {**P, "mode": "retest", "retest_tol_atr": 0.5, "bias": "1h"}
+    out = build_strategy("session_sweep", cfg.session, p).generate(bars([(200, 2100), (20, 1970)] + RETEST[1:]))
+    assert (out.signal == 1).sum() == 0
