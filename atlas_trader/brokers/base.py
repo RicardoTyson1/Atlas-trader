@@ -48,6 +48,10 @@ class Broker(ABC):
     @abstractmethod
     def close_position(self, position_id: str) -> None: ...
 
+    def close_partial(self, position_id: str, qty: float) -> None:
+        """Close `qty` lots of an open position (the rest stays open with its stop/target)."""
+        raise NotImplementedError
+
     def modify_stop(self, position_id: str, stop: float, target: float | None = None) -> bool:
         """Move a position's broker-side stop (and keep its target). True on success.
 

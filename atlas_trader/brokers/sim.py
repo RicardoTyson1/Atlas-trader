@@ -98,6 +98,19 @@ class SimBroker(Broker):
             if p.id == position_id:
                 self._close(s, self._mark(s), self.now)
 
+    def close_partial(self, position_id: str, qty: float) -> None:
+        for s_, p in self._pos.items():
+            if p.id == position_id:
+                if qty >= p.qty - 1e-9:
+                    return self._close(s_, self._mark(s_), self.now)
+                px = self._mark(s_)
+                pnl = p.side * (px - p.entry) * qty * self.vpp.get(s_, 1.0)
+                self.balance += pnl
+                p.qty = round(p.qty - qty, 8)
+                self.fills.append({"time": self.now, "symbol": s_, "side": -p.side, "qty": qty, "price": px,
+                                   "action": "partial", "pnl": pnl})
+                return None
+
     def modify_stop(self, position_id: str, stop: float, target: float | None = None) -> bool:
         for p in self._pos.values():
             if p.id == position_id:

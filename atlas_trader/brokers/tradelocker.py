@@ -196,6 +196,10 @@ class TradeLockerBroker(Broker):
     def close_position(self, position_id: str) -> None:
         self.api.close_position(position_id=int(position_id))
 
+    def close_partial(self, position_id: str, qty: float) -> None:
+        if not self.api.close_position(position_id=int(position_id), close_quantity=float(qty)):
+            raise RuntimeError(f"partial close of {qty} lots on position {position_id} was not executed")
+
     def close_all(self, symbol: str | None = None) -> None:
         # Positions only. Never bulk-delete orders here: on TradeLocker a position's
         # stop-loss/take-profit ARE orders, and deleting them leaves the trade naked
