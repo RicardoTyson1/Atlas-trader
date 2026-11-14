@@ -15,6 +15,7 @@ stop checked before target inside a bar, exactly like the engine):
                 follows the live exit (or is stopped at breakeven first).
   half0.5     : "merge" (added 2026-11-13) - close half at +0.5R, the rest keeps the live trailing exit.
   half0.5_be  : same, and the rest's stop moves to breakeven once +0.5R is reached.
+  half1       : close half at +1R, the rest keeps the live trailing exit (no breakeven move).
 Costs: real spread + slippage on every fill and $7/lot per side, all in R. "Win" = net R > 0.
 Data: GatesFX XAUUSD.R 5m 2023-03 -> 2026-11 (1m 13 months for the 1m reversal), halves A/B at
 the date midpoint.
@@ -52,7 +53,7 @@ MODELS = [
      {"move_atr": 5.0, "rsi_level": 25, "target": "half_move", "spike_atr": 0.0}),
     ("sym_triangle", "chart_patterns", "5m", "5m", {"patterns": "symmetrical_triangle"}),
 ]
-EXITS = ["base", "tp0.5", "tp1", "half1_be", "half0.5", "half0.5_be"]
+EXITS = ["base", "tp0.5", "tp1", "half1_be", "half0.5", "half0.5_be", "half1"]
 DATA: dict = {}
 
 
