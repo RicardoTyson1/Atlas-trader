@@ -6,7 +6,7 @@ Each record is 24 bytes, big-endian: seconds from midnight UTC, open, close, low
 price x 1000 for XAUUSD) and volume (float).
 
 Usage:
-  python research/dukascopy_download.py 2008-01-01 2026-11-13 data/raw/duka
+  python research/dukascopy_download.py 2008-01-01 2026-11-13 data/raw/duka [pause_seconds=10]
   -> data/raw/duka/XAUUSD_duka_1m.csv and XAUUSD_duka_5m.csv (time, open, high, low, close, volume)
 Days already downloaded are cached in data/raw/duka/days/ so the script can be re-run.
 """
@@ -37,7 +37,7 @@ def fetch_day(day: date, cache: Path) -> pd.DataFrame | None:
         try:
             r = requests.get(url, timeout=30)
             if r.status_code == 429:                       # rate limited: back off and retry
-                time.sleep(5 * (attempt + 1))
+                time.sleep(60 * (attempt + 1))
                 continue
             if r.status_code == 404:
                 f.write_text("time,open,high,low,close,volume\n")
@@ -70,8 +70,16 @@ def main(start: str, end: str, out: str) -> None:
             for n in range((date.fromisoformat(end) - date.fromisoformat(start)).days + 1)]
     days = [d for d in days if d.weekday() != 5]          # gold is shut on Saturdays
     frames = []
-    with ThreadPoolExecutor(2) as pool:                   # gentle: 2 requests at a time
-        for k, d in enumerate(pool.map(lambda x: fetch_day(x, cache), days)):
+    pause = float(sys.argv[4]) if len(sys.argv) > 4 else 10.0   # Dukascopy throttles bulk downloads hard
+
+    def slow(x):
+        cached = (cache / f"{x:%Y%m%d}.csv").exists()
+        d = fetch_day(x, cache)
+        if not cached:
+            time.sleep(pause)
+        return d
+    with ThreadPoolExecutor(1) as pool:                   # one request at a time, `pause` s apart
+        for k, d in enumerate(pool.map(slow, days)):
             if d is not None:
                 frames.append(d)
             if k % 250 == 0:
