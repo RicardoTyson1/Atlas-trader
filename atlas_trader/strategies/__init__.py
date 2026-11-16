@@ -27,6 +27,7 @@ from .trend_break import TrendBreakRetest
 from .zone_retest import ZoneRetest
 from .chart_patterns import ChartPatterns   # new 2026-11-09: 11 classic chart patterns
 from .session_sweep import SessionSweep     # new 2026-11-13: session high/low sweep reversal, HTF bias
+from .evening import Evening                # new 2026-11-15: researched session setups (fade, drive, drift, anchor, IB)
 
 # bb_reversion / st_confluence / smc_ob: added 2026-11-06 for testing (research/archetypes_study.py);
 # only the ones that pass go into config/default.yaml.
@@ -36,7 +37,7 @@ REGISTRY: dict[str, type[Strategy]] = {
         MomentumRSI, BBReversion, STConfluence, SMCOrderBlock, Scalp,
         OpeningRangeBreakout, TrendPullback, VwapReversion, SessionBreakout, DonchianTrend, TimeDrift,
         LiquidityFVG, SilverBullet, BreakRetest, ReversalTrail, TrendBreakRetest, ZoneRetest,
-        ChartPatterns, SessionSweep,
+        ChartPatterns, SessionSweep, Evening,
     )
 }
 
