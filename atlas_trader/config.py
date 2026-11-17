@@ -178,6 +178,8 @@ class Config:
     paths: dict[str, str]
     monitoring: dict[str, Any] = field(default_factory=dict)
     exits: dict[str, Any] = field(default_factory=dict)   # runaway_start_r / runaway_keep
+    # volatility switch: {min_volr, avg_days, base_days}; empty = off (research/regime_study.py)
+    regime: dict[str, Any] = field(default_factory=dict)
 
     def instrument(self, symbol: str) -> Instrument:
         if symbol not in self.instruments:
@@ -230,6 +232,7 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         tradelocker=raw.get("tradelocker") or {},
         webhook=raw.get("webhook") or {},
         exits=raw.get("exits") or {},
+        regime=raw.get("regime") or {},
         paths=raw.get("paths") or {},
         monitoring=raw.get("monitoring") or {},
     )

@@ -122,6 +122,44 @@ class Runner:
             return None
         return rec
 
+    def _quiet_market(self, sym: str, local) -> str | None:
+        """Volatility switch (Ricardo, 2026-11-16): no NEW trades on days when gold has been moving
+        less than usual. volr = 20-day average daily range / 250-day median of that average, from
+        COMPLETED daily candles. 16-year COMEX test (research/regime_study.py): trading only when
+        volr >= 1.2 improved both 2010-2018 (-225R -> -66R) and 2019-2026 (-54R -> +80R).
+        Returns a reason to skip, or None. Data problems never block trading (alert instead)."""
+        rg = self.cfg.regime or {}
+        if not rg.get("min_volr"):
+            return None
+        day = str((pd.Timestamp(local) + pd.Timedelta(hours=6)).date())     # gold day rolls 18:00 NY
+        cache = self.__dict__.setdefault("_regime_cache", {})
+        if (sym, day) not in cache:
+            volr = None
+            try:
+                d = self.broker.bars(sym, "1D", int(rg.get("base_days", 250)) + int(rg.get("avg_days", 20)) + 30)
+                if len(d) >= int(rg.get("avg_days", 20)) + 120:
+                    avg = (d["high"] - d["low"]).rolling(int(rg.get("avg_days", 20))).mean()
+                    base = avg.rolling(int(rg.get("base_days", 250)), min_periods=120).median()
+                    v = float(avg.iloc[-1] / base.iloc[-1])
+                    volr = v if np.isfinite(v) else None
+            except Exception as e:  # never let the switch break trading
+                log.warning("volatility switch: daily data failed: %r", e)
+            cache[(sym, day)] = volr
+            if volr is None:
+                self._alert_once(f"regime-nodata:{sym}:{day}", f"Volatility switch: no daily data for {sym} "
+                                 f"today, trading without the switch.")
+            elif volr < float(rg["min_volr"]):
+                self._alert_once(f"regime-off:{sym}:{day}", f"Volatility switch OFF for {sym} today: gold is "
+                                 f"moving {volr:.2f}x its usual range (needs {float(rg['min_volr']):.2f}x). "
+                                 f"No new trades today.", logging.INFO)
+            else:
+                self._alert_once(f"regime-on:{sym}:{day}", f"Volatility switch ON for {sym} today "
+                                 f"({volr:.2f}x usual range).", logging.INFO)
+        volr = cache[(sym, day)]
+        if volr is not None and volr < float(rg["min_volr"]):
+            return f"quiet market (volatility {volr:.2f}x < {float(rg['min_volr']):.2f}x)"
+        return None
+
     def _alert_once(self, key: str, msg: str, level: int = logging.WARNING) -> None:
         """Send `msg` at most once per `key` (keys usually include the date)."""
         if self.extra["alerts"].get(key):
@@ -272,6 +310,10 @@ class Runner:
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
             return f"skipped:{why}"
+        quiet = self._quiet_market(sym, local)
+        if quiet:
+            log.info("%s %s signal skipped: %s", source, sym, quiet)
+            return f"skipped:{quiet}"
         bid, ask = self.broker.quote(sym)
         price = ask if side > 0 else bid               # the price we will actually pay
         inst = self.cfg.instrument(sym)
