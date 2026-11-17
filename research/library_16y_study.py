@@ -8,13 +8,16 @@ Also reported with the volatility switch (only days with volr >= 1.2, research/r
 PASS (fixed before running): >= 200 trades, total R > 0, profit in BOTH halves (2010-2018 / 2019-2026)
 and in at least 4 of the 6 periods. STRONG: also t >= 2.5.
 Resumable: each finished config is appended to research/library_16y_trades.csv.
-Run in /opt/atlas-research (single process, low memory, a couple of hours):
-  PYTHONPATH=.:research nice -n 19 python research/library_16y_study.py
+Memory (1 GB server, bots running): `--one` runs ONE unfinished config and exits, so memory is freed
+between configs. A config whose process dies (out of memory) is marked CRASHED and skipped next time.
+Run in /opt/atlas-research:
+  until PYTHONPATH=.:research nice -n 19 python research/library_16y_study.py --one; [ $? -eq 3 ]; do :; done
+  PYTHONPATH=.:research python research/library_16y_study.py --report
 """
 from __future__ import annotations
 
-import json
 import os
+import sys
 from datetime import time
 
 import numpy as np
@@ -66,15 +69,27 @@ CONFIGS = [  # (label, model, timeframe, params)
 PERIODS = [("2010-2012", 2010, 2012), ("2013-2015", 2013, 2015), ("2016-2018", 2016, 2018),
            ("2019-2021", 2019, 2021), ("2022-2024", 2022, 2024), ("2025-2026", 2025, 2026)]
 OUT = "research/library_16y_trades.csv"
+STARTED = "research/library_16y_started.txt"
 
 
-def main():
+def main(one: bool = False) -> int:
+    done = set(pd.read_csv(OUT, usecols=["label"])["label"]) if os.path.exists(OUT) else set()
+    started = set(open(STARTED).read().split()) if os.path.exists(STARTED) else set()
+    todo = [c for c in CONFIGS if c[0] not in done]
+    for label in [c[0] for c in todo if c[0] in started]:     # its process died last time: skip it
+        print(f"{label}: CRASHED earlier (out of memory?) - skipped", flush=True)
+        pd.DataFrame({"label": [label], "entry_time": [pd.NaT], "r": [np.nan]}).to_csv(
+            OUT, mode="a", header=not os.path.exists(OUT), index=False)
+    todo = [c for c in todo if c[0] not in started]
+    if not todo:
+        return 3
+    if one:
+        todo = todo[:1]
     gc = load_csv("data/raw/GC_5m.csv")
     frames = {"5m": gc}
-    done = set(pd.read_csv(OUT, usecols=["label"])["label"]) if os.path.exists(OUT) else set()
-    for label, model, tf, params in CONFIGS:
-        if label in done:
-            continue
+    for label, model, tf, params in todo:
+        with open(STARTED, "a") as fh:
+            fh.write(label + "\n")
         if tf not in frames:
             frames[tf] = resample(gc, tf)
         cfg, inst = research_cfg()
@@ -95,11 +110,15 @@ def main():
         out.to_csv(OUT, mode="a", header=not os.path.exists(OUT), index=False)
         print(f"done {label}: {len(t)} trades, total {float(t['r'].sum()) if len(t) else 0:.1f}R", flush=True)
         del t, out
-    report()
+    return 0
 
 
 def report():
-    T = pd.read_csv(OUT).dropna(subset=["r"])
+    T = pd.read_csv(OUT)
+    empty = sorted(set(T.label) - set(T.dropna(subset=["r"]).label))
+    if empty:
+        print("No trades or CRASHED (see log):", ", ".join(empty))
+    T = T.dropna(subset=["r"])
     et = pd.to_datetime(T["entry_time"], utc=True).dt.tz_convert("America/New_York")
     T["year"] = et.dt.year
     T["period"] = pd.cut(T.year, [2009, 2012, 2015, 2018, 2021, 2024, 2026], labels=[p[0] for p in PERIODS])
@@ -132,4 +151,7 @@ def report():
 
 
 if __name__ == "__main__":
-    main()
+    if "--report" in sys.argv:
+        report()
+    else:
+        sys.exit(main(one="--one" in sys.argv))
