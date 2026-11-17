@@ -29,7 +29,10 @@ risk:
   risk_per_trade_pct: 1.0         # max loss per trade = 1% of account (~$95 on $9.5k) - lowered from 5% by Ricardo 2026-11-09 (demo)
   max_trades_per_day: 100000      # no cap (demo learning mode since 2026-11-05, Ricardo); was 8
   max_consecutive_losses: 100000  # no cap (demo learning mode); was 3 in a row = done for the day
-  max_open_positions: 1           # one trade at a time
+  max_open_positions: 1           # one trade at a time (per slot: donchian_trend_1h has its own slot)
+  hedging_account: false          # set true ONLY once the TradeLocker account is confirmed HEDGING (keeps
+                                  # 2 positions on XAUUSD.R apart). While false the bot never opens a 2nd
+                                  # position on a symbol, so donchian and the intraday models share 1 slot.
   max_lots: 2.0                   # hard cap (history: up to 4 lots on ~$2k)
   max_room_fraction_per_trade: 0.6   # a trade may use at most 60% of the room left to the day/account stop
   cooldown_after_loss_minutes: 0  # no cooldown (demo learning mode); was 15
@@ -200,6 +203,23 @@ strategies:
     params: {ref_session: "08:00-17:00", bias: "4h", confirm: "choch", hours: "20:00-24:00"}
     partial: {at_r: 1.0, fraction: 0.5, breakeven: true}
     trail_own_tf: true
+
+  # MULTI-DAY TREND (Ricardo, 2026-11-17): 1H Donchian breakout. Close above the 55-bar high -> long
+  # (below the 55-bar low -> short); stop 2 ATR; no target; exit on a close through the 20-bar channel.
+  # The ONLY setup that passed the 16-year COMEX library test (research/library_16y_study.py): 1,432
+  # trades, 30.7% wins, +0.061R, +86.7R, profitable in both halves and 4 of 6 periods - but t 1.06, NOT
+  # strong. Tested holding overnight/weekends and without the volatility switch, so: holds through the
+  # daily break, ignores the switch, 0.5% risk, its own position slot. Still closed before red-folder news.
+  - name: donchian_trend
+    label: donchian_trend_1h
+    instruments: [XAUUSD.R]
+    timeframe: 1H
+    history_bars: 300
+    params: {entry_bars: 55, exit_bars: 20}
+    hold_overnight: true
+    risk_pct: 0.5
+    ignore_regime: true
+    own_slot: true
 
 # Volatility switch (Ricardo, 2026-11-16): no NEW trades on days when gold has been moving less than
 # usual. volr = 20-day average daily range / 250-day median of that average (completed daily candles).
