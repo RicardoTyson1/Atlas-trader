@@ -52,3 +52,31 @@ Run V3 one time, unchanged, on COMEX 2010-2022 (GC prices + GC volume, research/
 | session_break_retest | V2 | 36 | 27.8 | -0.110 | -4.0 | -0.202 | -0.007 | 9.4 | | |
 | session_sweep_evening | ungated | 15 | 66.7 | 0.451 | 6.8 | -0.069 | 0.640 | 2.1 | | |
 | session_sweep_evening | (all gates) | 1-4 | | | | | | | | |
+
+## Out-of-sample check: COMEX GC 2010-06 -> 2022-12 (run 2026-11-17)
+
+`research/orderflow_oos_study.py`, run once, unchanged, on the server. GC prices and GC volume, live
+settings and exits, 08:00-11:00 NY, costs in R as every study. Pass bar fixed before running (see script docstring).
+
+**Verdict: FAIL for both models.** V3 failed condition 1 (expectancy must be > 0). It passed conditions 2 and 3.
+
+| model | gate | n | expR | totR | maxDD_R | t |
+|---|---|---|---|---|---|---|
+| smc_ob | ungated | 584 | -0.133 | -77.8 | 110.3 | -1.95 |
+| smc_ob | V3 | 502 | -0.080 | -40.3 | 86.7 | -1.06 |
+| momentum_rsi | ungated | 1774 | -0.183 | -325.2 | 325.2 | -4.71 |
+| momentum_rsi | V3 | 1518 | -0.155 | -235.4 | 235.4 | -3.61 |
+
+Expectancy (R) by period:
+
+| model | gate | 2010-12 | 2013-15 | 2016-18 | 2019-22 |
+|---|---|---|---|---|---|
+| smc_ob | ungated | 0.052 | 0.087 | -0.318 | -0.264 |
+| smc_ob | V3 | 0.139 | 0.184 | -0.296 | -0.245 |
+| momentum_rsi | ungated | -0.193 | -0.074 | -0.246 | -0.196 |
+| momentum_rsi | V3 | -0.176 | -0.054 | -0.177 | -0.183 |
+
+What it means:
+- V3 improved expectancy in 4/4 periods for both models and cut drawdown 21-28%. The filter effect is consistent.
+- But the models themselves lose money on 2010-2022 GC, gated or not. A filter on a losing model is still a losing model, so V3 does not go forward as a proposal.
+- Bigger finding: smc_ob and momentum_rsi have no edge before 2023 on this data (momentum_rsi t = -4.7). Caveats: GC futures prices, not XAUUSD; XAUUSD.R costs applied in R; back-adjusted continuous contract. Worth checking the live lineup on research/long_history_study.py's 16-year run before trusting 2023+ results.
