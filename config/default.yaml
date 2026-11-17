@@ -131,22 +131,24 @@ strategies:
   # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
   # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
   # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
-  - name: momentum_rsi
-    instruments: [XAUUSD.R]
-    timeframe: 5m
-    history_bars: 600
-    params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
-      disp_atr: 1.0
-      trend_filter: true
-      trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
-      trail_buf_atr: 0.3
-      spike_atr: 2.0
-      hours: "08:00-11:00"          # 08-11 only. All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
-                                    # -$580 (backtest: -210R / +111R per half vs +43R / +120R at 08-11).
-      max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
-      max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
-      run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
-                                    # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
+  # momentum_rsi REMOVED 2026-11-17 (Ricardo): worst model over 16 yrs (library_16y_study: -210.5R
+  # without the volatility switch; COMEX 2010-2022 -0.18R/trade, t=-4.7). Block kept below, commented.
+  # - name: momentum_rsi
+  #   instruments: [XAUUSD.R]
+  #   timeframe: 5m
+  #   history_bars: 600
+  #   params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
+  #     disp_atr: 1.0
+  #     trend_filter: true
+  #     trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
+  #     trail_buf_atr: 0.3
+  #     spike_atr: 2.0
+  #     hours: "08:00-11:00"          # 08-11 only. All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
+  #                                   # -$580 (backtest: -210R / +111R per half vs +43R / +120R at 08-11).
+  #     max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
+  #     max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
+  #     run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
+  #                                   # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
 
   # 2026-11-11 to 11-13 every strategy ran ALL HOURS on the demo: 19 trades, 5 wins, -$791.
   # Back to 08-11 NY on 2026-11-13 (Ricardo), matching the test results below.
