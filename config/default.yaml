@@ -201,6 +201,16 @@ strategies:
     partial: {at_r: 1.0, fraction: 0.5, breakeven: true}
     trail_own_tf: true
 
+# Volatility switch (Ricardo, 2026-11-16): no NEW trades on days when gold has been moving less than
+# usual. volr = 20-day average daily range / 250-day median of that average (completed daily candles).
+# 16-year COMEX test (research/regime_study.py): volr >= 1.2 kept 27% of trades and improved both
+# 2010-2018 (-225R -> -66R) and 2019-2026 (-54R -> +80R), but still lost in 2010-2018 - a safety layer,
+# not proof of an edge. Remove the section (or min_volr: 0) to switch it off.
+regime:
+  min_volr: 1.2
+  avg_days: 20
+  base_days: 250
+
 tradelocker:
   # GatesFX demo accounts are on demo.tradelocker.com (confirmed via API).
   # The account-ID allowlist keeps the bot on the intended account.
