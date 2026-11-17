@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from atlas_trader.brokers.sim import SimBroker
@@ -518,3 +519,48 @@ def test_no_stale_alert_right_after_daily_reopen(cfg):
     broker.set_time(now)
     runner.step(now)
     assert not any("No fresh" in m for m in runner.notify.messages)
+
+
+def _regime_runner(cfg, daily):
+    cfg.regime = {"min_volr": 1.2, "avg_days": 20, "base_days": 250}
+    base, broker, runner = make(cfg, days=2)
+    real = broker.bars
+    broker.bars = lambda s, tf, n: daily if tf == "1D" else real(s, tf, n)
+    return runner
+
+
+def _daily(last_range):
+    idx = pd.date_range("2025-01-01", periods=300, freq="1D", tz="UTC")
+    rng = np.r_[np.full(280, 10.0), np.full(20, last_range)]
+    c = np.full(300, 2000.0)
+    return pd.DataFrame({"open": c, "high": c + rng / 2, "low": c - rng / 2, "close": c, "volume": 1.0}, index=idx)
+
+
+def test_volatility_switch_blocks_quiet_days(cfg):
+    runner = _regime_runner(cfg, _daily(5.0))           # recent ranges half the usual -> quiet
+    local = pd.Timestamp("2026-01-06 09:00", tz="America/New_York")
+    assert "quiet market" in runner._quiet_market("NAS100", local)
+    assert any("switch OFF" in m for m in runner.notify.messages)
+
+
+def test_volatility_switch_allows_busy_days(cfg):
+    runner = _regime_runner(cfg, _daily(20.0))          # recent ranges double the usual
+    local = pd.Timestamp("2026-01-06 09:00", tz="America/New_York")
+    assert runner._quiet_market("NAS100", local) is None
+
+
+def test_volatility_switch_never_blocks_without_data(cfg):
+    runner = _regime_runner(cfg, _daily(5.0).iloc[:50])  # not enough history
+    local = pd.Timestamp("2026-01-06 09:00", tz="America/New_York")
+    assert runner._quiet_market("NAS100", local) is None
+    assert any("no daily data" in m for m in runner.notify.messages)
+
+
+def test_volatility_switch_off_when_not_configured(cfg):
+    base, broker, runner = make(cfg, days=2)
+    assert runner._quiet_market("NAS100", pd.Timestamp("2026-01-06 09:00", tz="America/New_York")) is None
+
+
+def test_live_config_has_volatility_switch():
+    from atlas_trader.config import load_config
+    assert load_config("config/default.yaml").regime["min_volr"] == 1.2
