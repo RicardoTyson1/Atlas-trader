@@ -232,12 +232,14 @@ class RiskManager:
         return r.risk_per_trade_pct if self.in_core_hours(when) else float(r.off_hours_risk_pct)
 
     def size(self, entry: float, stop: float, inst: Instrument, equity: float,
-             when: datetime | None = None) -> float:
-        """Lots to trade so a stop-out loses at most the allowed amount. 0 = don't trade."""
+             when: datetime | None = None, risk_pct: float | None = None) -> float:
+        """Lots to trade so a stop-out loses at most the allowed amount. 0 = don't trade.
+        `risk_pct` overrides the risk per trade (a strategy's own setting)."""
         if entry == stop or equity <= 0:
             return 0.0
         sizing_base = min(equity, self.risk.max_sizing_equity) if self.risk.max_sizing_equity else equity
-        budget = sizing_base * self.risk_pct_at(when) / 100.0
+        pct = float(risk_pct) if risk_pct is not None else self.risk_pct_at(when)
+        budget = sizing_base * pct / 100.0
         # room to the halt levels is measured on the REAL equity
         room = min(equity - self.daily_floor(), equity - self.dd_floor())
         budget = min(budget, room * self.risk.max_room_fraction_per_trade)

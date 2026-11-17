@@ -15,8 +15,10 @@ from .base import Account, Broker, Position
 
 
 class SimBroker(Broker):
-    def __init__(self, data: dict[str, pd.DataFrame], balance: float, value_per_point: dict[str, float] | None = None):
+    def __init__(self, data: dict[str, pd.DataFrame], balance: float, value_per_point: dict[str, float] | None = None,
+                 multi: bool = False):
         self.data = data                    # symbol -> 1m (or base) bars
+        self.multi = multi                  # True: several positions per symbol (hedging account)
         self.vpp = value_per_point or {}
         self.balance = balance
         self.now: pd.Timestamp | None = None  # current time (UTC); bars closed before this are visible
@@ -31,8 +33,8 @@ class SimBroker(Broker):
         self.now = now
         if prev is None:
             return
-        for sym, p in list(self._pos.items()):
-            df = self.data[sym]
+        for key, p in list(self._pos.items()):
+            df = self.data[p.symbol]
             step = df.index[1] - df.index[0]
             window = df[(df.index >= prev) & (df.index + step <= now)]
             for ts, bar in window.iterrows():
@@ -48,7 +50,7 @@ class SimBroker(Broker):
                     elif p.target is not None and bar.low <= p.target:
                         hit = p.target
                 if hit is not None:
-                    self._close(sym, hit, ts)
+                    self._close(key, hit, ts)
                     break
 
     def _visible(self, symbol: str) -> pd.DataFrame:
@@ -70,7 +72,7 @@ class SimBroker(Broker):
 
     def account(self) -> Account:
         upnl = sum(
-            p.side * (self._mark(s) - p.entry) * p.qty * self.vpp.get(s, 1.0) for s, p in self._pos.items()
+            p.side * (self._mark(p.symbol) - p.entry) * p.qty * self.vpp.get(p.symbol, 1.0) for p in self._pos.values()
         )
         return Account(balance=self.balance, equity=self.balance + upnl)
 
@@ -78,36 +80,37 @@ class SimBroker(Broker):
         return list(self._pos.values())
 
     def market_bracket(self, symbol, side, qty, stop, target) -> str:
-        if symbol in self._pos:
-            raise RuntimeError("SimBroker supports one position per symbol")
+        if symbol in self._pos and not self.multi:
+            raise RuntimeError("SimBroker supports one position per symbol (multi=False)")
         px = self._mark(symbol)
         pid = str(next(self._ids))
-        self._pos[symbol] = Position(pid, symbol, side, qty, px, stop, target,
+        key = symbol if symbol not in self._pos else f"{symbol}#{pid}"
+        self._pos[key] = Position(pid, symbol, side, qty, px, stop, target,
                                      has_stop=stop is not None, opened=self.now, tag="atlas")
         self.fills.append({"time": self.now, "symbol": symbol, "side": side, "qty": qty, "price": px, "action": "open"})
         return pid
 
-    def _close(self, symbol: str, price: float, ts) -> None:
-        p = self._pos.pop(symbol)
-        pnl = p.side * (price - p.entry) * p.qty * self.vpp.get(symbol, 1.0)
+    def _close(self, key: str, price: float, ts) -> None:
+        p = self._pos.pop(key)
+        pnl = p.side * (price - p.entry) * p.qty * self.vpp.get(p.symbol, 1.0)
         self.balance += pnl
-        self.fills.append({"time": ts, "symbol": symbol, "side": -p.side, "qty": p.qty, "price": price, "action": "close", "pnl": pnl})
+        self.fills.append({"time": ts, "symbol": p.symbol, "side": -p.side, "qty": p.qty, "price": price, "action": "close", "pnl": pnl})
 
     def close_position(self, position_id: str) -> None:
         for s, p in list(self._pos.items()):
             if p.id == position_id:
-                self._close(s, self._mark(s), self.now)
+                self._close(s, self._mark(p.symbol), self.now)
 
     def close_partial(self, position_id: str, qty: float) -> None:
         for s_, p in self._pos.items():
             if p.id == position_id:
                 if qty >= p.qty - 1e-9:
-                    return self._close(s_, self._mark(s_), self.now)
-                px = self._mark(s_)
-                pnl = p.side * (px - p.entry) * qty * self.vpp.get(s_, 1.0)
+                    return self._close(s_, self._mark(p.symbol), self.now)
+                px = self._mark(p.symbol)
+                pnl = p.side * (px - p.entry) * qty * self.vpp.get(p.symbol, 1.0)
                 self.balance += pnl
                 p.qty = round(p.qty - qty, 8)
-                self.fills.append({"time": self.now, "symbol": s_, "side": -p.side, "qty": qty, "price": px,
+                self.fills.append({"time": self.now, "symbol": p.symbol, "side": -p.side, "qty": qty, "price": px,
                                    "action": "partial", "pnl": pnl})
                 return None
 
@@ -129,6 +132,6 @@ class SimBroker(Broker):
         return pid
 
     def close_all(self, symbol: str | None = None) -> None:
-        for s in list(self._pos):
-            if symbol is None or s == symbol:
-                self._close(s, self._mark(s), self.now)
+        for s, p in list(self._pos.items()):
+            if symbol is None or p.symbol == symbol:
+                self._close(s, self._mark(p.symbol), self.now)

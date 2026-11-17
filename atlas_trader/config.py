@@ -56,6 +56,8 @@ class RiskSettings:
     guardian_stop_grace_seconds: float = 30.0 # time you get to place your own stop first
     guardian_allow_adding: bool = False       # manual add-ons to an open trade are allowed while the combined
                                               # size on that symbol stays within max_lots (each piece needs a stop)
+    hedging_account: bool = False             # True: the broker keeps several positions on one symbol apart
+                                              # (needed for own_slot strategies); False = never open a 2nd one
     core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
     off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
     min_target_r: float = 1.0                 # skip a trade whose target pays < this x risk AT THE FILL PRICE
@@ -117,6 +119,12 @@ class StrategySpec:
     # True: trail on this strategy's own candles at every hour (as its backtest did), instead of
     # switching to 1-minute candles outside core hours.
     trail_own_tf: bool = False
+    # Per-strategy overrides (added for donchian_trend_1h, Ricardo 2026-11-17):
+    hold_overnight: bool = False   # True: its trades are NOT closed at the daily break or the weekend
+    risk_pct: float | None = None  # risk per trade (%) for this strategy only; None = the global setting
+    ignore_regime: bool = False    # True: the volatility switch does not block its entries
+    own_slot: bool = False         # True: its trade has its own position slot next to the other
+                                   # strategies' (max_open_positions counts per slot)
 
     @property
     def id(self) -> str:
