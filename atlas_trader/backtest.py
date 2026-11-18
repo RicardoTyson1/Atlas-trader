@@ -269,6 +269,9 @@ def run_backtest(
                     reason = "end of data/day"
             elif reason is None and end_of_data:
                 reason = "end of data"
+            elif (reason is None and cfg.session.weekend_flat and close_local[i].weekday() == 4
+                  and close_mins[i] >= flat_m):
+                reason = "weekend"
             if reason is None and sexit[i] != 0 and sexit[i] in (2, pos.side):
                 reason = "exit signal"
             if reason is None and not np.isnan(pos.max_bars) and pos.bars >= pos.max_bars:
