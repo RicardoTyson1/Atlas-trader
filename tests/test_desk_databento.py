@@ -39,12 +39,17 @@ def fake_db(now, cost=0.05, live_records=None):
 
     class TS:
         def get_range(self, schema, start, end, **kw):
-            calls.append((schema, kw["symbols"][0]))
-            if schema == "ohlcv-1h":
-                n = int((pd.Timestamp(end) - pd.Timestamp(start)) / pd.Timedelta("1h"))
-                return _Res(_bars(pd.Timestamp(start), n, "1h"))
-            n = int((pd.Timestamp(end) - pd.Timestamp(start)) / pd.Timedelta("1min"))
-            return _Res(_bars(pd.Timestamp(start), n, "1min", base=200.0))
+            parts = []
+            for sym in kw["symbols"]:
+                calls.append((schema, sym))
+                if schema == "ohlcv-1h":
+                    n = int((pd.Timestamp(end) - pd.Timestamp(start)) / pd.Timedelta("1h"))
+                    df = _bars(pd.Timestamp(start), n, "1h")
+                else:
+                    n = int((pd.Timestamp(end) - pd.Timestamp(start)) / pd.Timedelta("1min"))
+                    df = _bars(pd.Timestamp(start), n, "1min", base=200.0)
+                parts.append(df.assign(symbol=sym))
+            return _Res(pd.concat(parts))
 
     class Historical:
         def __init__(self, key):
