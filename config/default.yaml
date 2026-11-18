@@ -28,14 +28,14 @@ prop_rules:
 risk:
   risk_per_trade_pct: 1.0         # max loss per trade = 1% of account (~$95 on $9.5k) - lowered from 5% by Ricardo 2026-11-09 (demo)
   max_trades_per_day: 100000      # no cap (demo learning mode since 2026-11-05, Ricardo); was 8
-  max_consecutive_losses: 2       # 2 losses in a row = no new trades for the rest of the day (Ricardo, 2026-11-18)
+  max_consecutive_losses: 100000  # no day stop: Ricardo 2026-11-18 "just a cool down, don't stop trading" (cooldown below)
   max_open_positions: 1           # one trade at a time (per slot: donchian_trend_1h has its own slot)
   hedging_account: true           # TradeLocker keeps every position separate (checked 2026-11-17: netting
                                   # exists only as a deprecated client-side SDK option, position_netting=False,
                                   # which the bot never uses). false = never open a 2nd position on a symbol.
   max_lots: 2.0                   # hard cap (history: up to 4 lots on ~$2k)
   max_room_fraction_per_trade: 0.6   # a trade may use at most 60% of the room left to the day/account stop
-  cooldown_after_loss_minutes: 0  # no cooldown (demo learning mode); was 15
+  cooldown_after_loss_minutes: 30 # 30 min pause after every losing trade, then trading resumes (Ricardo, 2026-11-18)
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
