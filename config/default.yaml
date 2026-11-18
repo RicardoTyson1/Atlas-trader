@@ -28,7 +28,7 @@ prop_rules:
 risk:
   risk_per_trade_pct: 1.0         # max loss per trade = 1% of account (~$95 on $9.5k) - lowered from 5% by Ricardo 2026-11-09 (demo)
   max_trades_per_day: 100000      # no cap (demo learning mode since 2026-11-05, Ricardo); was 8
-  max_consecutive_losses: 100000  # no cap (demo learning mode); was 3 in a row = done for the day
+  max_consecutive_losses: 2       # 2 losses in a row = no new trades for the rest of the day (Ricardo, 2026-11-18)
   max_open_positions: 1           # one trade at a time (per slot: donchian_trend_1h has its own slot)
   hedging_account: true           # TradeLocker keeps every position separate (checked 2026-11-17: netting
                                   # exists only as a deprecated client-side SDK option, position_netting=False,
