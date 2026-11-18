@@ -276,7 +276,7 @@ function render(d){
     [b.killed?'bad':b.alive?'ok':'bad','Bot',b.killed?'STOPPED (kill switch)':b.alive?`running · saved ${b.state_age_s}s ago`:'no heartbeat'],
     [acc.ok?'ok':'bad','Account',acc.ok?`demo #${b.account_id??''}`:'not reachable'],
     [n.loaded?'ok':'warn','News calendar',n.loaded?'loaded':'missing'],
-    [b.locked_today?'bad':b.controls.paused?'warn':(b.minutes_since_loss!=null&&b.minutes_since_loss<b.guardrails.cooldown_after_loss_min)?'warn':'ok','Guardrails',b.locked_today?'LOCKED for today':b.controls.paused?'entries paused':(b.minutes_since_loss!=null&&b.minutes_since_loss<b.guardrails.cooldown_after_loss_min)?'cool-down':'armed'],
+    [b.locked_today?'bad':b.controls.paused?'warn':cdLeft(b)!=null?'warn':'ok','Guardrails',b.locked_today?'LOCKED for today':b.controls.paused?'entries paused':cdLeft(b)!=null?'cool-down':'armed'],
   ];
   $('chips').innerHTML=chips.map(([c,k,v])=>`<span class="chip ${c}"><i></i>${esc(k)} <b>${esc(v)}</b></span>`).join('');
   // tabs
@@ -344,6 +344,9 @@ function render(d){
   $('overview').innerHTML=`<table><tr><th>Market</th><th class="r">Price</th><th>Bias</th><th>RSI 15m / 4H</th></tr>${(d.overview||[]).map(o=>o.available?`<tr><td>${esc(o.name)}</td><td class="r">${fx(o.price)}</td><td class="${biasCls(o.bias)}">${o.bias}</td><td>${o.rsi.map(r=>`<span class="${r.zone.includes('buy')?'up':r.zone.includes('sell')?'down':'muted'}">${r.rsi??'—'}</span>`).join(' / ')}</td></tr>`:`<tr><td>${esc(o.name)}</td><td class="muted" colspan="3">not on the broker</td></tr>`).join('')}</table>`;
   drawChart(s);
 }
+function cdLeft(b){ // the bot's own countdown first, else the desk's estimate from the last loss
+  if(b.cooldown_left_min!=null)return b.cooldown_left_min;
+  const g=b.guardrails;if(b.minutes_since_loss!=null&&b.minutes_since_loss<g.cooldown_after_loss_min)return g.cooldown_after_loss_min-b.minutes_since_loss;return null}
 function renderBot(b){
   const acc=b.account||{},g=b.guardrails,ct=b.controls;
   const lossPct=b.day_pnl_pct!=null&&b.day_pnl_pct<0?-b.day_pnl_pct:0;
@@ -355,9 +358,9 @@ function renderBot(b){
     <span class="k">Risk per trade</span><span>${b.risk_per_trade_pct}% <span class="muted">(set on the server only)</span></span>
     <span class="k">Trades today</span><span>${b.trades_today}</span>
     <span class="k">Losses in a row</span><span class="${b.losses_in_row>=2?'down':''}">${b.losses_in_row}${g.loss_streak_lockout>0?` of ${g.loss_streak_lockout}`:''}</span>
-    <span class="k">Since last loss</span><span>${b.minutes_since_loss==null?'—':mins(b.minutes_since_loss)}${b.minutes_since_loss!=null&&b.minutes_since_loss<g.cooldown_after_loss_min?' <b class="down">cool-down</b>':''}</span></div>
+    <span class="k">Since last loss</span><span>${b.minutes_since_loss==null?'—':mins(b.minutes_since_loss)}${cdLeft(b)!=null?' <b class="down">cool-down</b>':''}</span></div>
     ${g.daily_loss_lockout_pct>0?`<div class="lbl">Day loss vs ${g.daily_loss_lockout_pct}% lockout</div><div class="meter"><div style="width:${Math.min(100,lossPct/g.daily_loss_lockout_pct*100)}%;background:${lossPct>=g.daily_loss_lockout_pct*.66?'var(--down)':'var(--acc)'}"></div></div>`:''}
-    ${b.minutes_since_loss!=null&&b.minutes_since_loss<g.cooldown_after_loss_min?`<div class="lock" style="border-color:var(--warn);color:var(--warn);background:rgba(255,209,102,.08)">COOL-DOWN after a loss: ${mins(g.cooldown_after_loss_min-b.minutes_since_loss)} left. Breathe; no revenge trade, no size-up.</div>`:''}
+    ${cdLeft(b)!=null?`<div class="lock" style="border-color:var(--warn);color:var(--warn);background:rgba(255,209,102,.08)">COOL-DOWN after a loss: ${mins(cdLeft(b))} left. The bot takes no new trades until then. Breathe; no revenge trade, no size-up.</div>`:''}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
       ${ct.paused?`<button class="btn acc" onclick="ctl('resume')" ${b.locked_today?'disabled':''}>Resume entries</button>`:`<button class="btn" onclick="ctl('pause')">Pause all entries</button>`}
       <button class="btn red" onclick="openKill()" ${b.killed?'disabled':''}>Emergency stop</button></div>

@@ -146,7 +146,11 @@ class DeskFeed:
         self.state_dir = Path(state_dir)
         self.clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
         self.tz = "America/New_York"
-        self.guard = C.Guardrails(desk_cfg.get("guardrails"))
+        g = dict(desk_cfg.get("guardrails") or {})
+        if "cooldown_after_loss_min" not in g and bot_cfg is not None:
+            # one number for bot and desk: the bot's own pause after a loss (config/default.yaml)
+            g["cooldown_after_loss_min"] = getattr(bot_cfg.risk, "cooldown_after_loss_minutes", 30)
+        self.guard = C.Guardrails(g)
         self._bars: dict[tuple[str, str], tuple[float, pd.DataFrame]] = {}
         self._lock = threading.RLock()
         self._acct_cache: tuple[float, dict] | None = None
@@ -487,6 +491,8 @@ class DeskFeed:
             "trades_today": len(today), "losses_in_row": max(streak, int(risk.get("consec_losses") or 0)),
             "minutes_since_loss": None if mins_since_loss is None else round(mins_since_loss),
             "day_halt": risk.get("day_halt"), "hard_halt": risk.get("hard_halt"),
+            "cooldown_until": risk.get("cooldown_until"),
+            "cooldown_left_min": self._cooldown_left(risk.get("cooldown_until"), now),
             "models": models, "controls": {k: ctrl[k] for k in ("disabled", "paused", "lockout_day", "lockout_reason")},
             "control_log": list(reversed(ctrl.get("log", [])[-15:])),
             "today": [{k: v for k, v in r.items() if not k.startswith("_")} for r in today][-20:],
@@ -499,6 +505,19 @@ class DeskFeed:
         out["locked_today"] = ctrl.get("lockout_day") == day
         self.guard_tick(out, now)
         return out
+
+    @staticmethod
+    def _cooldown_left(until, now: pd.Timestamp) -> float | None:
+        """Minutes left in the BOT's own pause after a loss (risk state cooldown_until), or None."""
+        if not until:
+            return None
+        try:
+            t = pd.Timestamp(until)
+            t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
+        except Exception:  # noqa: BLE001
+            return None
+        left = (t - now).total_seconds() / 60
+        return round(left, 1) if left > 0 else None
 
     # ------------------------------------------------------------------ guardrails
     def guard_tick(self, bot: dict, now: pd.Timestamp) -> None:
@@ -542,6 +561,8 @@ class DeskFeed:
                 msg = "All new bot entries are paused. Open trades are still managed."
             elif action in ("model_on", "resume"):
                 why = self.guard.can_loosen(d, day, bot.get("minutes_since_loss"))
+                if not why and bot.get("cooldown_left_min"):
+                    why = f"the bot is cooling down after a loss: {bot['cooldown_left_min']:.0f} more minutes"
                 if why:
                     C.record(d, who, f"BLOCKED {action} {model or ''}: {why}", now.to_pydatetime())
                     C.save(self.state_dir, d)

@@ -31,9 +31,10 @@ desk:
   guardrails:
     daily_loss_lockout_pct: 0       # 0 = off. (e.g. 2.0 = entries off for the rest of the day at -2%)
     loss_streak_lockout: 0          # 0 = off. (e.g. 2 = entries off for the day after 2 losses in a row)
-    cooldown_after_loss_min: 30     # after a loss: a countdown on the desk, and nothing can be switched back on
-                                    # from the page until it ends. The bot's own pause after a loss is
-                                    # risk.cooldown_after_loss_minutes in config/default.yaml.
+    # cooldown_after_loss_min: not set here on purpose: the desk uses the bot's own
+    # risk.cooldown_after_loss_minutes from config/default.yaml (30 min since 2026-11-18, commit 46d4297),
+    # so the two can never disagree. The desk shows the bot's live countdown and blocks switching
+    # anything back on from the page until it ends.
   # Shown on the desk as a reminder (facts from his own records and the 16-year tests, 2026-11-18).
   record:
     rules:

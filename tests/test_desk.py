@@ -141,6 +141,7 @@ class FakeCfg:
 
         class R:
             risk_per_trade_pct = 1.0
+            cooldown_after_loss_minutes = 45
         self.risk = R()
         self.tradelocker = {"demo_account_ids": [2594911]}
 
@@ -219,4 +220,17 @@ def test_cooldown_only_config_never_stops_trading(tmp_path):
     import yaml
     real = yaml.safe_load(open("config/desk.yaml"))["desk"]["guardrails"]
     assert real["daily_loss_lockout_pct"] == 0 and real["loss_streak_lockout"] == 0
-    assert real["cooldown_after_loss_min"] == 30
+    assert "cooldown_after_loss_min" not in real          # taken from the bot's own config
+
+
+def test_desk_uses_bot_cooldown_and_its_live_countdown(tmp_path):
+    feed, st = _feed(tmp_path, sod=9550.0)
+    feed2 = DeskFeed({"instruments": feed.cfg["instruments"]}, DemoSource(), bot_cfg=FakeCfg(), state_dir=st)
+    assert feed2.guard.cooldown_min == 45                 # FakeCfg.risk.cooldown_after_loss_minutes
+    until = (pd.Timestamp.now(tz=UTC) + pd.Timedelta(minutes=20)).isoformat()
+    (st / "runner_state.json").write_text(json.dumps({"risk": {"sod_balance": 9550.0, "cooldown_until": until}}))
+    b = feed2.bot()
+    assert 19 <= b["cooldown_left_min"] <= 20
+    feed2.set_control("pause", "test")
+    ok, msg = feed2.set_control("resume", "test")
+    assert not ok and "cooling down" in msg
