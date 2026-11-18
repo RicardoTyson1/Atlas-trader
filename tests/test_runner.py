@@ -635,3 +635,15 @@ def test_backtest_weekend_flat_closes_friday():
     assert len(t) and "weekend" in set(t["reason"])
     ex = pd.to_datetime(t.loc[t.reason == "weekend", "exit_time"], utc=True).dt.tz_convert("America/New_York")
     assert all(ex.dt.weekday == 4)
+
+
+def test_live_config_lineup_2026_11_17():
+    from atlas_trader.config import load_config
+    c = load_config("config/default.yaml")
+    ids = [s.id for s in c.strategies]
+    assert "momentum_rsi" not in ids                                   # removed (16-year test: -143R)
+    don = c.strategies[-1]                                              # lowest priority
+    assert don.id == "donchian_trend" and don.timeframe == "1H"
+    assert don.params == {"entry_bars": 55, "exit_bars": 20}
+    assert don.hold_overnight and not don.use_regime
+    assert not any(s.hold_overnight for s in c.strategies[:-1])
