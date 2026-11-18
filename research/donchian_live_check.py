@@ -11,6 +11,9 @@ Two questions the 16-year test did not answer:
     with and without Donchian at the lowest priority. The volatility switch (volr >= 1.2) applies to
     every setup except Donchian (it made Donchian worse: +86.7R -> +19.8R).
     The 1m reversal is modelled on 5m (no 1m data before 2025).
+2026-11-17 result: hold = GO (+98.3R lineup, both halves), flat daily = NO (-54.1R alone).
+Ricardo chose "hold, but flat every Friday" (no weekend gap risk). donchian_wkflat tests exactly that
+(session.weekend_flat), with the same rule below; it goes live only if it passes.
 Rule (fixed before running): Donchian goes live only in the version (hold or flat) that
  a) passes on its own (>= 200 trades, profit in both halves, >= 4 of 6 periods), and
  b) makes the one-slot lineup better in BOTH halves than the lineup without it.
@@ -40,6 +43,7 @@ DON = {"entry_bars": 55, "exit_bars": 20}
 JOBS = {  # name: (model, timeframe, params, exit mode)
     "donchian_hold": ("donchian_trend", "1H", DON, "base"),
     "donchian_flat": ("donchian_trend", "1H", DON, "base"),
+    "donchian_wkflat": ("donchian_trend", "1H", DON, "base"),
     "smc_ob_am": ("smc_ob", "5m", {"sweep_bars": 24, "reward_risk": 0.0, "hours": AM}, "base"),
     "break_retest_am": ("session_sweep", "5m", {"mode": "retest", "bias": "4h", "wick_frac": 0.4,
                                                 "ref_session": "18:00-24:00,00:00-08:00", "hours": AM}, "base"),
@@ -67,6 +71,8 @@ def run_job(name: str) -> None:
         s = cfg.session
         s.timezone, s.reopen, s.overnight = "Europe/Berlin", None, False
         s.trade_start, s.last_entry, s.flat_by = time(0, 5), time(22, 30), time(22, 50)
+    if name == "donchian_wkflat":
+        cfg.session.weekend_flat = True             # hold overnight Mon-Thu, flat Friday 16:50 NY
     t = run_backtest(df, build_strategy(model, cfg.session, params), inst, cfg).trades
     if ex == "base":
         r = t["r"] - 2 * inst.commission_per_lot / ((t["entry"] - t["init_stop"]).abs() * inst.value_per_point)
@@ -107,7 +113,8 @@ def report() -> None:
     print(pd.DataFrame(rows).T.to_string())
     combos = {"lineup (no Donchian)": LINEUP,
               "lineup + Donchian hold": LINEUP + ["donchian_hold"],
-              "lineup + Donchian flat daily": LINEUP + ["donchian_flat"]}
+              "lineup + Donchian flat daily": LINEUP + ["donchian_flat"],
+              "lineup + Donchian hold, flat Friday": LINEUP + ["donchian_wkflat"]}
     res = {}
     for k, order in combos.items():
         t = one_slot(L, order)
@@ -119,14 +126,16 @@ def report() -> None:
     for k, v in res.items():
         print(f"  {k}: {v['by_setup']}")
     base = res["lineup (no Donchian)"]
-    for v in ("hold", "flat"):
+    names = {"hold": "lineup + Donchian hold", "flat": "lineup + Donchian flat daily",
+             "wkflat": "lineup + Donchian hold, flat Friday"}
+    for v in ("hold", "flat", "wkflat"):
         alone = rows[f"donchian_{v}"]
         a = alone["n"] >= 200 and alone["older_R"] > 0 and alone["newer_R"] > 0 and alone["pos_periods"] >= 4
-        c = res[f"lineup + Donchian {'hold' if v == 'hold' else 'flat daily'}"]
+        c = res[names[v]]
         b = c["older_R"] > base["older_R"] and c["newer_R"] > base["newer_R"]
         print(f"Donchian {v}: passes alone {a}, improves lineup in both halves {b} -> {'GO' if a and b else 'NO'}")
     # how often Donchian is in a trade when the morning window opens (blocks the 08-11 setups)
-    for v in ("hold", "flat"):
+    for v in ("hold", "flat", "wkflat"):
         d = L[f"donchian_{v}"]
         days = pd.date_range("2010-07-01", "2026-11-13", freq="B", tz="America/New_York") + pd.Timedelta(hours=8)
         s = np.searchsorted(d.entry_time.values, days.tz_convert("UTC").values, side="right") - 1
