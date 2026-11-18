@@ -216,21 +216,19 @@ class Runner:
                 self._detect_closed(positions, acct.balance, local)
 
         flat_reason = self.rm.must_flatten(local)
-        keep = self._overnight_keep(flat_reason, local)
         if flat_reason == "end of session":
-            # 24/7 symbols (e.g. BTCUSD) are not closed at gold's daily break
-            if not [p for p in positions if not self._always_open(p.symbol) and p.id not in keep]:
+            # 24/7 symbols (e.g. BTCUSD) and multi-day strategies (hold_overnight) are not closed
+            # at gold's daily break
+            if not [p for p in positions if not self._keeps_through_break(p)]:
                 flat_reason = None
-        elif flat_reason == "news blackout" and not [p for p in positions if p.id not in keep]:
-            flat_reason = None
         if flat_reason and positions:
-            self._flatten(flat_reason, keep_always_open=flat_reason == "end of session", keep_ids=keep)
+            self._flatten(flat_reason, keep_always_open=flat_reason == "end of session")
             actions.append(f"flatten:{flat_reason}")
             positions = self.broker.positions()
             acct = self.broker.account()
             self._detect_closed(positions, acct.balance, local)
 
-        held = {p.symbol for p in positions}
+        held = {(self._slot_of_pos(p), p.symbol) for p in positions}
         for spec, strat in self.strats:
             for sym in spec.instruments:
                 try:
@@ -243,14 +241,15 @@ class Runner:
                 if res:
                     actions.append(res)
                     if res == "entered":
-                        held.add(sym)
+                        held.add((self._slot_of_spec(spec), sym))
                         positions = self.broker.positions()
         self.save()
         return actions
 
     def _run_strategy(self, spec, strat, sym, held, positions, now, local, acct) -> str | None:
         tf = pd.Timedelta(timeframe_to_offset(spec.timeframe))
-        if sym in held:
+        slot = self._slot_of_spec(spec)
+        if (slot, sym) in held:
             return self._manage_exit(spec, strat, sym, now)
         key = f"{spec.id}:{sym}"
         expected_last = now.floor(tf) - tf          # newest bar that should be complete
@@ -293,20 +292,19 @@ class Runner:
             sym, int(row["signal"]), float(row["stop"]),
             None if pd.isna(row["target"]) else float(row["target"]),
             None if pd.isna(row["rr"]) else float(row["rr"]),
-            local, acct.equity, len(positions), source=spec.id,
+            local, acct.equity, sum(1 for p in positions if self._slot_of_pos(p) == slot), source=spec.id,
             max_bars=None if pd.isna(mb) else float(mb),
             trail=None if pd.isna(trs) else (float(trs), 0.0 if pd.isna(tbuf) else float(tbuf)),
             spike=None if pd.isna(spk) else (float(spk), 1.0 if pd.isna(spr) else float(spr),
                                              2 if pd.isna(spm) else int(spm)),
             tp_note=row.get("tp_kind") if isinstance(row.get("tp_kind"), str) else None,
-            use_regime=spec.use_regime,
         )
 
     # ------------------------------------------------------------ entries
     def _try_enter(self, sym, side, stop, target, rr, local, equity, n_open, source,
                    max_bars: float | None = None, trail: tuple[float, float] | None = None,
                    spike: tuple[float, float, int] | None = None, worst_price: float | None = None,
-                   tp_note: str | None = None, use_regime: bool = True) -> str:
+                   tp_note: str | None = None) -> str:
         if self._pending_for(sym) is not None:
             return "skipped:waiting for an unconfirmed order to show up"
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open,
@@ -314,10 +312,14 @@ class Runner:
         if not ok:
             log.info("%s %s signal skipped: %s", source, sym, why)
             return f"skipped:{why}"
-        quiet = self._quiet_market(sym, local) if use_regime else None
+        spec = self._spec(source)
+        quiet = None if spec is not None and spec.ignore_regime else self._quiet_market(sym, local)
         if quiet:
             log.info("%s %s signal skipped: %s", source, sym, quiet)
             return f"skipped:{quiet}"
+        if not self.cfg.risk.hedging_account and any(p.symbol == sym for p in self.broker.positions()):
+            # a netting account would merge/offset a 2nd position on the same symbol
+            return "skipped:a position on this symbol is already open (account not set as hedging)"
         bid, ask = self.broker.quote(sym)
         price = ask if side > 0 else bid               # the price we will actually pay
         inst = self.cfg.instrument(sym)
@@ -331,13 +333,19 @@ class Runner:
             return f"skipped:price {price:.2f} moved too far past the entry (limit {worst_price:.2f})"
         if target is None:
             target = price + side * (rr or 2.0) * abs(price - stop)
+            # "no target" strategies send rr=1000: cap the broker TP at half the price away
+            # (a short's TP must stay above zero)
+            if abs(target - price) > 0.5 * price:
+                target = round(price + side * 0.5 * price, 2)
         if side * (target - price) <= 0:
             return "skipped:price already past the target"
         reward_r = side * (target - price) / abs(price - stop)
         if reward_r < self.cfg.risk.min_target_r:
             return (f"skipped:target pays only {reward_r:.2f}R at the fill price "
                     f"(min {self.cfg.risk.min_target_r:.2f}R)")
-        qty = self.rm.size(price, stop, inst, equity, when=local.to_pydatetime() if hasattr(local, "to_pydatetime") else local)
+        qty = self.rm.size(price, stop, inst, equity,
+                           when=local.to_pydatetime() if hasattr(local, "to_pydatetime") else local,
+                           risk_pct=spec.risk_pct if spec is not None else None)
         if qty <= 0:
             return "skipped:size below minimum lot (stop too wide for risk budget)"
         bal_before = self.broker.account().balance     # before the opening fee is charged
@@ -517,9 +525,9 @@ class Runner:
                 to_close[p.id] = "no stop-loss"
             elif p.qty > self.cfg.risk.max_lots + 1e-9:
                 to_close[p.id] = f"size {p.qty} > max {self.cfg.risk.max_lots} lots"
-        by_symbol: dict[str, list] = {}
+        by_symbol: dict[tuple, list] = {}               # (symbol, slot): own_slot trades are not add-ons
         for p in positions:
-            by_symbol.setdefault(p.symbol, []).append(p)
+            by_symbol.setdefault((p.symbol, self._slot_of_pos(p)), []).append(p)
         allow_add = self.cfg.risk.guardian_allow_adding
         add_ons: set[str] = set()                     # accepted add-ons (not the first piece on a symbol)
         for ps in by_symbol.values():
@@ -621,20 +629,32 @@ class Runner:
         inst = self.cfg.instruments.get(symbol)
         return bool(inst and inst.always_open)
 
-    def _overnight_keep(self, reason: str | None, local) -> set:
-        """Bot trades of `hold_overnight` strategies stay open through the daily break and news
-        blackouts (as tested), Mon-Thu only: everything is flat before the weekend."""
-        if reason not in ("end of session", "news blackout"):
-            return set()
-        if reason == "end of session" and local.weekday() >= 4:
-            return set()
-        hold = {s.id for s in self.cfg.strategies if s.hold_overnight}
-        return {pid for pid, t in self.tracked.items() if t.get("bot") and t.get("strategy") in hold}
+    def _spec(self, source: str | None):
+        """The strategy spec whose id is `source`, or None (manual / recovered / TradingView)."""
+        return next((x for x in self.cfg.strategies if x.id == source), None) if source else None
 
-    def _flatten(self, reason: str, keep_always_open: bool = False, keep_ids: set | None = None) -> bool:
-        keep_ids = keep_ids or set()
+    def _holds_overnight(self, pid: str) -> bool:
+        t = self.tracked.get(str(pid))
+        spec = self._spec(t.get("strategy")) if t and t.get("bot") else None
+        return bool(spec is not None and spec.hold_overnight)
+
+    def _slot_of_spec(self, spec) -> str:
+        return spec.id if spec.own_slot else "main"
+
+    def _slot_of_pos(self, p) -> str:
+        """Position slot: an own_slot strategy's trade has its own; everything else shares "main"."""
+        t = self.tracked.get(str(p.id))
+        spec = self._spec(t.get("strategy")) if t and t.get("bot") else None
+        return self._slot_of_spec(spec) if spec is not None else "main"
+
+    def _keeps_through_break(self, p) -> bool:
+        return self._always_open(p.symbol) or self._holds_overnight(p.id)
+
+    def _flatten(self, reason: str, keep_always_open: bool = False) -> bool:
+        """Close positions. `keep_always_open` (the daily break) keeps 24/7 symbols and the trades
+        of hold_overnight strategies open."""
         ids = [p.id for p in self.broker.positions()
-               if not (keep_always_open and self._always_open(p.symbol)) and p.id not in keep_ids]
+               if not (keep_always_open and self._keeps_through_break(p))]
         if not ids:
             return True
         ok = self._close_verified(ids)

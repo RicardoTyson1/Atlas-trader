@@ -56,6 +56,8 @@ class RiskSettings:
     guardian_stop_grace_seconds: float = 30.0 # time you get to place your own stop first
     guardian_allow_adding: bool = False       # manual add-ons to an open trade are allowed while the combined
                                               # size on that symbol stays within max_lots (each piece needs a stop)
+    hedging_account: bool = False             # True: the broker keeps several positions on one symbol apart
+                                              # (needed for own_slot strategies); False = never open a 2nd one
     core_hours: str | None = None             # e.g. "08:00-11:00" (NY): full risk only in these hours
     off_hours_risk_pct: float | None = None   # risk per trade outside core_hours (None = same as inside)
     min_target_r: float = 1.0                 # skip a trade whose target pays < this x risk AT THE FILL PRICE
@@ -76,8 +78,6 @@ class Session:
     # (e.g. gold's daily break 16:50-18:05 NY). Entries are allowed from reopen to last_entry
     # (wrapping past midnight) and everything is flattened during the break, every day.
     reopen: time | None = None
-    # Backtests with overnight=True: still flat every Friday at flat_by (no weekend holding).
-    weekend_flat: bool = False
 
     def in_break(self, m: int) -> bool:
         """True if `m` (minutes since local midnight) is inside the daily break."""
@@ -119,13 +119,12 @@ class StrategySpec:
     # True: trail on this strategy's own candles at every hour (as its backtest did), instead of
     # switching to 1-minute candles outside core hours.
     trail_own_tf: bool = False
-    # False: this strategy ignores the volatility switch (`regime`), e.g. the 1H Donchian trend,
-    # which the switch made worse in the 16-year test.
-    use_regime: bool = True
-    # True: this strategy's open trade is NOT closed at the daily break or by news blackouts (it was
-    # tested holding overnight), but it IS closed every Friday at flat_by (no weekend holding) and on
-    # a risk halt / kill switch. Entries still follow the normal session and news rules.
-    hold_overnight: bool = False
+    # Per-strategy overrides (added for donchian_trend_1h, Ricardo 2026-11-17):
+    hold_overnight: bool = False   # True: its trades are NOT closed at the daily break or the weekend
+    risk_pct: float | None = None  # risk per trade (%) for this strategy only; None = the global setting
+    ignore_regime: bool = False    # True: the volatility switch does not block its entries
+    own_slot: bool = False         # True: its trade has its own position slot next to the other
+                                   # strategies' (max_open_positions counts per slot)
 
     @property
     def id(self) -> str:
@@ -212,7 +211,6 @@ def config_from_dict(raw: dict[str, Any]) -> Config:
         weekdays=tuple(s.get("weekdays", [0, 1, 2, 3, 4])),
         overnight=bool(s.get("overnight", False)),
         reopen=_t(s["reopen"]) if s.get("reopen") else None,
-        weekend_flat=bool(s.get("weekend_flat", False)),
     )
     nb = raw.get("news_blackouts", {}) or {}
     events = [
