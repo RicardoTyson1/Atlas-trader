@@ -564,3 +564,74 @@ def test_volatility_switch_off_when_not_configured(cfg):
 def test_live_config_has_volatility_switch():
     from atlas_trader.config import load_config
     assert load_config("config/default.yaml").regime["min_volr"] == 1.2
+
+
+def test_strategy_can_skip_volatility_switch(cfg):
+    runner = _regime_runner(cfg, _daily(5.0))           # quiet market
+    local = pd.Timestamp("2026-01-06 10:30", tz="America/New_York")
+    res = runner._try_enter("NAS100", 1, 1.0, None, 2.0, local, 10000.0, 0, source="x", use_regime=True)
+    assert "quiet market" in res
+    runner.broker.quote = lambda s: (100.0, 100.1)       # stop above price -> stops at the next check
+    res = runner._try_enter("NAS100", 1, 1e9, None, 2.0, local, 10000.0, 0, source="x", use_regime=False)
+    assert res == "skipped:price already through the stop"   # got past the volatility switch
+
+
+def test_spec_use_regime_defaults_on():
+    from atlas_trader.config import StrategySpec
+    assert StrategySpec(name="smc_ob", instruments=["X"]).use_regime is True
+    assert StrategySpec(name="donchian_trend", instruments=["X"], use_regime=False).use_regime is False
+
+
+def _hold_runner(cfg, hold):
+    from atlas_trader.config import StrategySpec
+    cfg.strategies = [StrategySpec(name="donchian_trend", instruments=["NAS100"], timeframe="1H",
+                                   hold_overnight=hold)]
+    base, broker, runner, t = _guard_setup(cfg)
+    px = broker._mark("NAS100")
+    pid = broker.market_bracket("NAS100", 1, 1.0, stop=px - 10, target=px + 100)
+    runner.tracked[pid] = {"symbol": "NAS100", "bot": True, "strategy": "donchian_trend", "side": 1}
+    return broker, runner, pid
+
+
+def test_hold_overnight_keeps_trade_through_daily_break_and_news(cfg):
+    broker, runner, pid = _hold_runner(cfg, True)
+    tue = pd.Timestamp("2026-01-06 16:55", tz="America/New_York")
+    assert runner._overnight_keep("end of session", tue) == {pid}
+    assert runner._overnight_keep("news blackout", tue) == {pid}
+    assert runner._overnight_keep("risk halt", tue) == set()          # a halt still closes it
+    assert runner._flatten("end of session", keep_ids={pid}) is True
+    assert [p.id for p in broker.positions()] == [pid]
+
+
+def test_hold_overnight_is_flat_before_the_weekend(cfg):
+    broker, runner, pid = _hold_runner(cfg, True)
+    fri = pd.Timestamp("2026-01-09 16:55", tz="America/New_York")
+    assert runner._overnight_keep("end of session", fri) == set()
+    runner._flatten("end of session", keep_ids=runner._overnight_keep("end of session", fri))
+    assert broker.positions() == []
+
+
+def test_other_strategies_are_still_flat_at_the_break(cfg):
+    broker, runner, pid = _hold_runner(cfg, False)
+    tue = pd.Timestamp("2026-01-06 16:55", tz="America/New_York")
+    assert runner._overnight_keep("end of session", tue) == set()
+
+
+def test_backtest_weekend_flat_closes_friday():
+    from atlas_trader.backtest import run_backtest
+    from atlas_trader.config import load_config
+    from atlas_trader.strategies import build_strategy
+    import copy
+    idx = pd.date_range("2026-01-05 00:00", "2026-01-16 21:00", freq="1h", tz="UTC")
+    c = 2000 + np.arange(len(idx)) * 0.5                       # steady uptrend: Donchian stays long
+    df = pd.DataFrame({"open": c - 0.2, "high": c + 0.3, "low": c - 0.5, "close": c, "volume": 1.0}, index=idx)
+    cfg = load_config("config/default.yaml")
+    cfg.session.overnight, cfg.session.weekend_flat = True, True
+    from datetime import time as _t
+    cfg.session.trade_start, cfg.session.last_entry = _t(0, 0), _t(23, 59)
+    inst = copy.deepcopy(cfg.instrument("XAUUSD.R"))
+    strat = build_strategy("donchian_trend", cfg.session, {"entry_bars": 10, "exit_bars": 5})
+    t = run_backtest(df, strat, inst, cfg).trades
+    assert len(t) and "weekend" in set(t["reason"])
+    ex = pd.to_datetime(t.loc[t.reason == "weekend", "exit_time"], utc=True).dt.tz_convert("America/New_York")
+    assert all(ex.dt.weekday == 4)
