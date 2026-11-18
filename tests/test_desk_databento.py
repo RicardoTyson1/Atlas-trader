@@ -171,3 +171,23 @@ def test_history_retries_after_a_gateway_timeout():
     f = DatabentoLive("k", {"gold": "GC.v.0"}, client_factory=mod, clock=lambda: NOW)
     f._history_safe(tries=3, wait_s=0)
     assert f.has("gold") and f.status == "history loaded"
+
+
+def test_late_history_restarts_live_to_fill_the_gap():
+    mod, _ = fake_db(NOW)
+    f = DatabentoLive("k", {"gold": "GC.v.0"}, client_factory=mod, clock=lambda: NOW)
+    t = NOW.floor("1min")
+    f.on_second("gold", t, 1, 1, 1, 1, 1)                 # live got going first
+
+    class L:
+        stopped = False
+
+        def stop(self):
+            L.stopped = True
+
+    f._live = L()
+    f._history_safe(tries=1, wait_s=0)
+    assert L.stopped and f._resync == f._hist_end
+    start = f._replay_start()
+    assert start == f._hist_end and f._resync is None
+    assert f.minutes("gold").index[-1] < start            # minutes from the gap on are rebuilt by replay

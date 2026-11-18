@@ -72,6 +72,8 @@ class DatabentoLive:
         self.status = "starting"
         self.history_cost: float | None = None
         self._stop = threading.Event()
+        self._hist_end: pd.Timestamp | None = None
+        self._resync: pd.Timestamp | None = None
         self._live = None
         self._thread: threading.Thread | None = None
 
@@ -168,6 +170,14 @@ class DatabentoLive:
         for i in range(1, tries + 1):
             try:
                 self._load_history()
+                live = self._live
+                if live is not None and self._hist_end is not None:
+                    # live started before history arrived: restart it so the replay fills the gap
+                    self._resync = self._hist_end
+                    try:
+                        live.stop()
+                    except Exception:  # noqa: BLE001
+                        log.debug("databento live stop for resync failed", exc_info=True)
                 return
             except Exception as e:  # noqa: BLE001
                 log.warning("databento history failed (try %d/%d): %s: %s", i, tries, type(e).__name__,
@@ -200,10 +210,13 @@ class DatabentoLive:
         h = db.Historical(self.key)
         rng = h.metadata.get_dataset_range(dataset=DATASET)
         sch = rng.get("schema", {}) if isinstance(rng, dict) else {}
-        end_m = pd.Timestamp(sch.get("ohlcv-1m", {}).get("end") or rng["end"])
-        end_h = pd.Timestamp(sch.get("ohlcv-1h", {}).get("end") or rng["end"])
+        # Stay well clear of the newest data: requests that end right at the edge of what the history
+        # server holds were timing out (504). The live replay fills the last hour or so anyway.
+        end_m = pd.Timestamp(sch.get("ohlcv-1m", {}).get("end") or rng["end"]).floor("1h") - timedelta(hours=1)
+        end_h = pd.Timestamp(sch.get("ohlcv-1h", {}).get("end") or rng["end"]).floor("1D")
         start_m = end_m - timedelta(days=self.minute_days)
         start_h = end_h - timedelta(days=self.hour_days)
+        self._hist_end = end_m
         syms = list(self.symbols.values())
         kw = dict(dataset=DATASET, symbols=syms, stype_in="continuous")
         cost = (h.metadata.get_cost(schema="ohlcv-1m", start=start_m, end=end_m, **kw)
@@ -251,6 +264,8 @@ class DatabentoLive:
         with self._lock:
             lasts = [max(b) for b in self._mins.values() if b]
         start = pd.Timestamp(min(lasts), unit="s", tz="UTC") if lasts else now - pd.Timedelta(minutes=30)
+        if self._resync is not None:
+            start, self._resync = min(start, self._resync), None
         start = max(start, floor)
         cut = int(start.timestamp())
         with self._lock:                                  # the replay rebuilds these minutes
