@@ -18,9 +18,9 @@ A private dashboard built around Ricardo's own way of trading (rule book: `/mnt/
 
 ## Controls and guardrails
 The page can always make the bot safer: switch a model off, pause all new entries, emergency stop (kill switch, type STOP).
-It has no risk-size control. Guardrails from his rule book (`config/desk.yaml`):
-- down 2% on the day, or 2 losses in a row -> new entries off for the rest of the NY day, and nothing can be switched back on until 18:00 NY;
-- 30 minute cool-down after a loss before anything can be switched back on.
+It has no risk-size control. Guardrails (`config/desk.yaml`). Ricardo 2026-11-18: "just a cool down, don't stop trading":
+- 30 minute cool-down after a loss: a countdown on the desk, and nothing can be switched back on from the page until it ends;
+- day lockouts (-X% on the day, N losses in a row) exist but are OFF (0). Setting them turns new entries off for the rest of the NY day.
 The bot reads `state/desk_controls.json` before every NEW entry (`atlas_trader/desk/controls.py`). Open trades are always managed.
 A missing or broken file has no effect, so the desk can never stop the bot from managing trades.
 Note: the lockout is tripped by the desk process; if the desk is not running, the bot's own risk limits still apply.

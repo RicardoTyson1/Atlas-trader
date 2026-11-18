@@ -27,16 +27,18 @@ desk:
   # Guardrails (Ricardo 2026-11-18: "the way I trade, not the way I spiral to a blown account").
   # The page can always make the bot safer. It can never raise risk, and while a guardrail is tripped it
   # cannot switch anything back on.
-  # Numbers from his rule book (/mnt/project-files/atlas/rick-rules.md, "Anti-spiral guardrails").
+  # Ricardo 2026-11-18: "just a cool down. don't stop trading" -> no day lockouts (0 = off), cool-down only.
   guardrails:
-    daily_loss_lockout_pct: 2.0     # down 2% on the day (equity vs start-of-day balance) -> entries off for the day
-    loss_streak_lockout: 2          # 2 losing trades in a row today -> entries off for the day
-    cooldown_after_loss_min: 30     # no switching models back on within 30 min of a loss
+    daily_loss_lockout_pct: 0       # 0 = off. (e.g. 2.0 = entries off for the rest of the day at -2%)
+    loss_streak_lockout: 0          # 0 = off. (e.g. 2 = entries off for the day after 2 losses in a row)
+    cooldown_after_loss_min: 30     # after a loss: a countdown on the desk, and nothing can be switched back on
+                                    # from the page until it ends. The bot's own pause after a loss is
+                                    # risk.cooldown_after_loss_minutes in config/default.yaml.
   # Shown on the desk as a reminder (facts from his own records and the 16-year tests, 2026-11-18).
   record:
     rules:
       - "Fixed risk per trade. Never size up after a loss. No averaging into losers."
-      - "30 min cool-down after a loss. Done for the day after 2 losses in a row or -2% on the day."
+      - "30 min cool-down after a loss. Keep trading after it: no day stop (Rick, 2026-11-18)."
       - "Minimum stop $5 on gold (1m stops of ~$1.70 lose ~0.7R a trade to costs)."
       - "One position at a time."
     manual_account:   # #2595168, 43 trades, Nov 5-9 2026 (research/manual_history.py)

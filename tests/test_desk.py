@@ -210,3 +210,13 @@ def test_runner_skips_new_entries_when_paused_from_desk(cfg):
         runner.step(t)
         t += pd.Timedelta("5min")
     assert not [f for f in broker.fills if f["action"] == "open"]
+
+
+def test_cooldown_only_config_never_stops_trading(tmp_path):
+    """Ricardo 2026-11-18: 'just a cool down, don't stop trading' -> lockouts 0 = off."""
+    g = C.Guardrails({"daily_loss_lockout_pct": 0, "loss_streak_lockout": 0, "cooldown_after_loss_min": 30})
+    assert g.trip(10000, 5000, 9) is None
+    import yaml
+    real = yaml.safe_load(open("config/desk.yaml"))["desk"]["guardrails"]
+    assert real["daily_loss_lockout_pct"] == 0 and real["loss_streak_lockout"] == 0
+    assert real["cooldown_after_loss_min"] == 30
