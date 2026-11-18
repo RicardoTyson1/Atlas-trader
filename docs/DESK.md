@@ -34,3 +34,20 @@ atlas desk                        # real: separate READ-ONLY TradeLocker login, 
 ```
 On the server: `deploy/atlas-desk.service` (127.0.0.1:8787, Nice 10, 300 MB memory cap).
 Prices come from the TradeLocker feed through one slow throttle (1 call per second at most) so the desk cannot eat the bot's rate limits.
+
+## Live CME prices (Databento)
+
+With `desk.databento.enabled: true` in `config/desk.yaml` and `DATABENTO_API_KEY` in `.env`, the desk
+draws gold, silver, oil, S&P, US30 and Nasdaq from CME futures (continuous front month: GC, SI, CL, ES,
+YM, NQ) on Rick's live Databento subscription:
+
+* At start it downloads 1-minute bars (4 days) and 1-hour bars (240 days) once. The cost is checked
+  first and the download is skipped above `max_history_usd` (that market then stays on broker prices).
+* Then one live session on 1-second bars keeps the forming candle current. The page refreshes every
+  5 seconds while the feed is live (15 s otherwise). If the session drops it reconnects and replays the
+  gap (Databento keeps 24 h for replay).
+* 4H and daily candles start at 18:00 New York, the CME trading day.
+* Futures sit a little apart from the broker's CFD prices (the basis). The page shows the broker price
+  next to the futures price, and moves the bot's trade-entry lines by the basis so they sit where the
+  trade really is. The bot itself still trades and reads broker prices only; nothing here changes it.
+* The dollar index is not on CME, so it stays on broker prices.

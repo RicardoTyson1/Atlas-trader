@@ -18,6 +18,8 @@ from .data import load_csv, resample, synthetic_intraday
 from .montecarlo import simulate_challenge
 from .strategies import REGISTRY, build_strategy
 
+log = logging.getLogger("atlas")
+
 
 def _load_env(path: str = ".env") -> None:
     p = Path(path)
@@ -313,7 +315,15 @@ def cmd_desk(args, cfg: Config) -> None:
         password = password_from_env()
         if len(password) < 10:
             sys.exit("Set DESK_PASSWORD (10+ characters) in .env before starting the desk.")
-    feed = DeskFeed(dcfg, src, bot_cfg=cfg, state_dir=state_dir)
+    live = None
+    dbc = dcfg.get("databento") or {}
+    if not args.demo and dbc.get("enabled") and os.environ.get("DATABENTO_API_KEY"):
+        from .desk.databento_live import DatabentoLive
+        live = DatabentoLive(os.environ["DATABENTO_API_KEY"], dbc.get("symbols") or {},
+                             max_history_usd=float(dbc.get("max_history_usd", 2.0))).start()
+    elif dbc.get("enabled") and not args.demo:
+        log.warning("desk: databento enabled but DATABENTO_API_KEY is not set; using broker prices")
+    feed = DeskFeed(dcfg, src, bot_cfg=cfg, state_dir=state_dir, live=live)
     desk = Desk(feed, password, title=dcfg.get("title", "Atlas Desk"))
     serve(desk, args.host or dcfg.get("host", "127.0.0.1"), int(args.port or dcfg.get("port", 8787)))
 

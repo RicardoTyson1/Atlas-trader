@@ -139,9 +139,10 @@ class DemoSource:
 # =========================================================================== the feed
 class DeskFeed:
     def __init__(self, desk_cfg: dict, source, bot_cfg=None, state_dir: str | Path = "state",
-                 clock=None):
+                 clock=None, live=None):
         self.cfg = desk_cfg
         self.src = source
+        self.live = live          # DatabentoLive (CME futures, every second) or None = broker prices only
         self.bot_cfg = bot_cfg
         self.state_dir = Path(state_dir)
         self.clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
@@ -166,7 +167,29 @@ class DeskFeed:
     def inst(self, key: str) -> dict | None:
         return next((i for i in self.instruments if i["key"] == key), None)
 
+    @property
+    def label(self) -> str:
+        if self.live is not None:
+            return f"{self.live.label}; broker prices where not covered"
+        return self.src.label
+
+    def uses_live(self, key: str) -> bool:
+        return self.live is not None and self.live.has(key)
+
+    def feed_info(self, key: str) -> dict:
+        if self.uses_live(key):
+            return self.live.info(key)
+        return {"feed": "broker", "symbol": (self.inst(key) or {}).get("symbol"), "live": False}
+
     def bars(self, key: str, tf: str) -> pd.DataFrame:
+        if self.uses_live(key):
+            try:
+                return self.live.bars(key, tf, COUNT[tf])
+            except Exception as e:  # noqa: BLE001 - fall back to the broker
+                log.warning("desk: live bars %s %s failed: %r", key, tf, e)
+        return self.broker_bars(key, tf)
+
+    def broker_bars(self, key: str, tf: str) -> pd.DataFrame:
         ins = self.inst(key)
         if not ins or not ins["available"]:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
@@ -261,7 +284,15 @@ class DeskFeed:
             "checklist": check, "atr15": None if atr15 is None else round(atr15, 4),
             "brief": A.brief(ins["name"], price, bias, fib, solid, check, above, below, news),
             "session": A.session_now(now),
+            "feed": self.feed_info(key),
         }
+        if self.uses_live(key) and price is not None:
+            # the bot trades the broker's CFD; futures sit a little apart (the basis). Trade lines on the
+            # chart are shifted by it so they land where the trade really is.
+            bb = self.broker_bars(key, "1m")
+            bp = float(bb["close"].iloc[-1]) if len(bb) else None
+            out["broker_price"] = bp
+            out["basis"] = None if bp is None else round(price - bp, 5)
         if with_chart:
             cb = b.get(chart_tf) if chart_tf in b else self.bars(key, chart_tf)
             cb = cb.tail(300)
