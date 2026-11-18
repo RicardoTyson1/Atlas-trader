@@ -114,6 +114,9 @@ instruments:
 # docs/RESULTS_ARCHETYPES_2026-11-06.md. TradingView alerts are OFF (webhook below, 2026-11-07).
 # To resume momentum_rsi as well, un-comment its block below.
 strategies:
+  # 2026-11-18 (Ricardo): trade 24/5, no specific window -> every strategy's hours set to 00:00-23:59
+  # (the session break 16:50-18:05 NY and weekends still apply). Warned: all hours lost on the demo
+  # 11-11..13 (19 trades, 5 wins, -$791) and in the backtests; 08-11 was the only profitable window.
   # smc_ob = H4 EMA-50 bias -> 5m liquidity sweep (24 candles) -> displacement FVG -> order-block
   # retest; stop beyond the sweep; no fixed target, candle trailing from +1R.
   # Study: n=270, 37% wins, +0.209R/trade, t=1.56 (A +0.066, B +0.336).
@@ -124,7 +127,7 @@ strategies:
     params:
       sweep_bars: 24
       reward_risk: 0.0
-      hours: "08:00-11:00"
+      hours: "00:00-23:59"             # 24/5 (Ricardo 2026-11-18); was 08:00-11:00
   # st_confluence REMOVED 2026-11-14 (Ricardo: keep only improvements). With full costs it made +1.7R over
   # 113 trades (35.4% wins, newer half -0.6R) - below the bot's average on both win rate and R, and it
   # took the one-trade slot from better setups. Code kept (atlas_trader/strategies/st_confluence.py).
@@ -170,7 +173,7 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 1m
     history_bars: 600
-    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "08:00-11:00"}
+    params: {move_atr: 5.0, rsi_level: 25, target: half_move, spike_atr: 0.0, hours: "00:00-23:59"}
     # "Merge B" exit (Ricardo, 2026-11-13): bank half at +0.5R, stop on the rest to breakeven.
     # research/exit_options_study.py, 08-11: 76.4% wins, +12.3R vs 68.3% / +9.6R with the plain exit.
     partial: {at_r: 0.5, fraction: 0.5, breakeven: true}
@@ -188,7 +191,7 @@ strategies:
     # range). research/sweep_improve_study.py: 108 trades, 34.3% wins, +0.342R/trade (A +0.377 /
     # B +0.307) vs 30.6% / +0.198R (A +0.355 / B +0.039). Missed the pre-set rule on half-A win rate
     # (27.8% vs 30.3%): judge it on the demo after ~30 trades.
-    params: {mode: retest, bias: "4h", ref_session: "18:00-24:00,00:00-08:00", hours: "08:00-11:00",
+    params: {mode: retest, bias: "4h", ref_session: "18:00-24:00,00:00-08:00", hours: "00:00-23:59",
              wick_frac: 0.4}
 
   # EVENING ONLY (Ricardo, 2026-11-13): session sweep reversal. The NY day session's (08:00-17:00)
@@ -202,7 +205,7 @@ strategies:
     instruments: [XAUUSD.R]
     timeframe: 15m
     history_bars: 1200              # ~12 days of 15m: warms up the 4H EMA-50
-    params: {ref_session: "08:00-17:00", bias: "4h", confirm: "choch", hours: "20:00-24:00"}
+    params: {ref_session: "08:00-17:00", bias: "4h", confirm: "choch", hours: "00:00-23:59"}
     partial: {at_r: 1.0, fraction: 0.5, breakeven: true}
     trail_own_tf: true
 

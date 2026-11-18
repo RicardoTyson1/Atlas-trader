@@ -502,7 +502,7 @@ def test_live_config_partial_only_on_reversal():
     assert rules["session_sweep_evening"] == {"at_r": 1.0, "fraction": 0.5, "breakeven": True}
     assert all(v is None for k, v in rules.items() if k not in ("reversal_trail_1m", "session_sweep_evening"))
     ev = next(s for s in c.strategies if s.id == "session_sweep_evening")
-    assert ev.trail_own_tf and ev.params["hours"] == "20:00-24:00" and ev.timeframe == "15m"
+    assert ev.trail_own_tf and ev.params["hours"] == "00:00-23:59" and ev.timeframe == "15m"
     # nothing else trades the evening
     assert all("20:00" not in str(s.params.get("hours", "")) for s in c.strategies if s.id != ev.id)
 
