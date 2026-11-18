@@ -37,6 +37,8 @@ from .backtest import runaway_lock, spike_exit, spike_lock, trail_candidate
 from .risk import RiskManager, RiskState
 from .strategies import build_strategy
 
+from .desk.controls import entry_block as desk_entry_block
+
 log = logging.getLogger("atlas")
 BOT_TAG = "atlas"
 
@@ -307,6 +309,13 @@ class Runner:
                    tp_note: str | None = None) -> str:
         if self._pending_for(sym) is not None:
             return "skipped:waiting for an unconfirmed order to show up"
+        # Desk controls (dashboard): a model switched off, entries paused, or a guardrail lockout.
+        # Only ever blocks NEW entries; open trades are managed as usual. Missing file = no effect.
+        ny_day = str((local + pd.Timedelta(hours=6)).date()) if hasattr(local, "date") else ""
+        blocked = desk_entry_block(self.state_dir, source, ny_day)
+        if blocked:
+            log.info("%s %s signal skipped: %s", source, sym, blocked)
+            return f"skipped:{blocked}"
         ok, why = self.rm.check_entry(local.to_pydatetime() if hasattr(local, "to_pydatetime") else local, n_open,
                                       always_open=self._always_open(sym))
         if not ok:

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+:root{--bg:#141826;--panel:#1b2033;--line:#2c3350;--text:#e6e8f0;--mut:#8a90a8;--acc:#f0a35e}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+form{background:var(--panel);border:1px solid var(--line);padding:28px;width:min(340px,92vw);border-top:2px solid var(--acc)}
+h1{font:600 14px ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;margin:0 0 18px;color:var(--acc)}
+input{width:100%;padding:10px 12px;background:#10131f;border:1px solid var(--line);color:var(--text);font-size:15px}
+button{margin-top:12px;width:100%;padding:10px;background:var(--acc);border:0;color:#1a1206;font-weight:600;cursor:pointer}
+.bad{color:#ff7a7a;font-size:13px;margin-top:10px;display:none}
+</style></head><body>
+<form method="post" action="/login">
+<h1>{{TITLE}}</h1>
+<input type="password" name="password" placeholder="Desk password" autofocus autocomplete="current-password">
+<button type="submit">Open the desk</button>
+<div class="bad" id="bad">Wrong password.</div>
+</form>
+<script>if(location.search.includes('bad'))document.getElementById('bad').style.display='block'</script>
+</body></html>

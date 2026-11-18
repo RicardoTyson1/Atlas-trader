@@ -1,0 +1,52 @@
+# Atlas master desk (dashboard). Run:  atlas desk            (needs DESK_PASSWORD in .env)
+#                                      atlas desk --demo     (made-up prices, no broker, for trying it)
+desk:
+  title: "Atlas Desk"
+  host: 127.0.0.1          # private: only reachable from the server itself (tunnel / Tailscale)
+  port: 8787
+  bot_config: config/default.yaml
+  # Markets on the desk. The first broker symbol that exists on GatesFX TradeLocker is used;
+  # a market with none found is shown as "not on the broker".
+  instruments:
+    - {key: gold,   name: Gold,          symbols: [XAUUSD.R, XAUUSD]}
+    - {key: silver, name: Silver,        symbols: [XAGUSD.R, XAGUSD]}
+    - {key: oil,    name: Oil (WTI),     symbols: [USOIL.R, XTIUSD.R, WTI.R, USOIL, XTIUSD, WTI]}
+    - {key: spx,    name: S&P 500,       symbols: [SPX500.R, US500.R, SPX500, US500]}
+    - {key: us30,   name: US30,          symbols: [US30.R, US30]}
+    - {key: nas100, name: Nasdaq 100,    symbols: [NAS100.R, NAS100]}
+    - {key: dxy,    name: Dollar index,  symbols: [DXY.R, USDX.R, DXY, USDX]}
+  # SMT divergence pairs: [market, partner, inverse]. inverse = they normally move opposite ways.
+  smt_pairs:
+    - [gold, silver, false]
+    - [gold, dxy, true]
+    - [spx, us30, false]
+    - [spx, nas100, false]
+    - [oil, spx, false]
+  # Log a desk read when this many of the 6 checks line up (default: all but one).
+  alert_min_checks: 5
+  # Guardrails (Ricardo 2026-11-18: "the way I trade, not the way I spiral to a blown account").
+  # The page can always make the bot safer. It can never raise risk, and while a guardrail is tripped it
+  # cannot switch anything back on.
+  # Ricardo 2026-11-18: "just a cool down. don't stop trading" -> no day lockouts (0 = off), cool-down only.
+  guardrails:
+    daily_loss_lockout_pct: 0       # 0 = off. (e.g. 2.0 = entries off for the rest of the day at -2%)
+    loss_streak_lockout: 0          # 0 = off. (e.g. 2 = entries off for the day after 2 losses in a row)
+    # cooldown_after_loss_min: not set here on purpose: the desk uses the bot's own
+    # risk.cooldown_after_loss_minutes from config/default.yaml (30 min since 2026-11-18, commit 46d4297),
+    # so the two can never disagree. The desk shows the bot's live countdown and blocks switching
+    # anything back on from the page until it ends.
+  # Shown on the desk as a reminder (facts from his own records and the 16-year tests, 2026-11-18).
+  record:
+    rules:
+      - "Fixed risk per trade. Never size up after a loss. No averaging into losers."
+      - "30 min cool-down after a loss. Keep trading after it: no day stop (Rick, 2026-11-18)."
+      - "Minimum stop $5 on gold (1m stops of ~$1.70 lose ~0.7R a trade to costs)."
+      - "One position at a time."
+    manual_account:   # #2595168, 43 trades, Nov 5-9 2026 (research/manual_history.py)
+      - {label: "After a win",            value: "77% wins, +$14.7k", good: true}
+      - {label: "After a loss",           value: "31% wins, -$577",   good: false}
+      - {label: "Sized up after a loss",  value: "2 trades, -$5,152", good: false}
+    tests:            # 16 years of COMEX gold 1m, real GatesFX costs
+      - {label: "Daily Fib + 1m extreme RSI",          value: "-98R (FAIL)"}
+      - {label: "All your pieces stacked + guardrails", value: "-129R, 475 trades (FAIL); -168R without guardrails"}
+      - {label: "donchian_trend_1h (live)",            value: "+86.7R, 1,432 trades (weak pass)"}
