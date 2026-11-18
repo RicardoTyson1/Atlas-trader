@@ -1,0 +1,23 @@
+# Atlas master desk (private dashboard). Read-only prices; controls only write state/desk_controls.json
+# (and state/KILL for the emergency stop), which the bot reads.
+# Install:  sudo cp deploy/atlas-desk.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now atlas-desk
+# Needs DESK_PASSWORD (10+ characters) in /opt/atlas-trader/.env. Listens on 127.0.0.1:8787 only.
+[Unit]
+Description=Atlas master desk (dashboard)
+After=network-online.target atlas@default.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlas
+WorkingDirectory=/opt/atlas-trader
+ExecStart=/opt/atlas-trader/.venv/bin/atlas --config config/default.yaml desk
+Restart=on-failure
+RestartSec=60
+# the bot comes first on a 1 CPU / 1 GB box
+Nice=10
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

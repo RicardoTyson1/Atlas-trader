@@ -24,5 +24,8 @@ atlas = "atlas_trader.cli:main"
 [tool.setuptools.packages.find]
 include = ["atlas_trader*"]
 
+[tool.setuptools.package-data]
+"atlas_trader.desk" = ["static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

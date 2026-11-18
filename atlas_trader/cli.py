@@ -288,6 +288,36 @@ def cmd_reset_halt(args, cfg: Config) -> None:
           "(a running bot would overwrite this file).")
 
 
+def cmd_desk(args, cfg: Config) -> None:
+    """The master desk dashboard (read-only prices + bot status + guarded controls)."""
+    import yaml
+
+    from .desk.feed import DemoSource, DeskFeed, ReadOnlyBroker
+    from .desk.server import Desk, password_from_env, serve
+
+    _load_env()
+    dcfg = (yaml.safe_load(open(args.desk_config)) or {}).get("desk", {})
+    if args.demo:
+        src = DemoSource()
+        state_dir = args.state_dir or "state_demo"
+        password = password_from_env() or "demo"
+    else:
+        from .brokers.tradelocker import TradeLockerBroker
+        allowed = [int(a) for a in (cfg.tradelocker.get("demo_account_ids") or [])]
+        if not allowed:
+            sys.exit("The desk needs tradelocker.demo_account_ids in the bot config.")
+        # a separate, READ-ONLY login: the desk object cannot place or close orders
+        src = ReadOnlyBroker(TradeLockerBroker(cfg.tradelocker.get("demo_url", "https://demo.tradelocker.com"),
+                                               account_id=allowed[0], allowed_account_ids=allowed))
+        state_dir = args.state_dir or cfg.paths.get("state_dir", "state")
+        password = password_from_env()
+        if len(password) < 10:
+            sys.exit("Set DESK_PASSWORD (10+ characters) in .env before starting the desk.")
+    feed = DeskFeed(dcfg, src, bot_cfg=cfg, state_dir=state_dir)
+    desk = Desk(feed, password, title=dcfg.get("title", "Atlas Desk"))
+    serve(desk, args.host or dcfg.get("host", "127.0.0.1"), int(args.port or dcfg.get("port", 8787)))
+
+
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     ap = argparse.ArgumentParser(prog="atlas", description="Atlas Trader")
@@ -349,6 +379,14 @@ def main(argv: list[str] | None = None) -> None:
     st.set_defaults(fn=cmd_status)
     rh = sub.add_parser("reset-halt", help="clear a bot hard halt after review")
     rh.set_defaults(fn=cmd_reset_halt)
+
+    dk = sub.add_parser("desk", help="run the master desk dashboard (private web page)")
+    dk.add_argument("--desk-config", default="config/desk.yaml")
+    dk.add_argument("--demo", action="store_true", help="made-up prices, no broker login")
+    dk.add_argument("--host")
+    dk.add_argument("--port", type=int)
+    dk.add_argument("--state-dir")
+    dk.set_defaults(fn=cmd_desk)
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
