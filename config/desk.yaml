@@ -15,6 +15,13 @@ desk:
     - {key: us30,   name: US30,          symbols: [US30.R, US30]}
     - {key: nas100, name: Nasdaq 100,    symbols: [NAS100.R, NAS100]}
     - {key: dxy,    name: Dollar index,  symbols: [DXY.R, USDX.R, DXY, USDX]}
+  # Live CME futures from Databento (Rick's live subscription), updated every second. Continuous front
+  # month by volume. Markets not listed here (dollar index) stay on broker prices. History (1m for 4 days,
+  # 1h for 240 days) is downloaded once at start, only if its cost is under max_history_usd.
+  databento:
+    enabled: true
+    symbols: {gold: GC.v.0, silver: SI.v.0, oil: CL.v.0, spx: ES.v.0, us30: YM.v.0, nas100: NQ.v.0}
+    max_history_usd: 2.0
   # SMT divergence pairs: [market, partner, inverse]. inverse = they normally move opposite ways.
   smt_pairs:
     - [gold, silver, false]

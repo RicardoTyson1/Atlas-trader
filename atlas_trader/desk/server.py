@@ -48,14 +48,14 @@ class Desk:
             snap = self.feed.analyse(key, tf)
             bot = self.feed.bot()
             return {
-                "title": self.title, "source": self.feed.src.label, "demo": self.feed.src.demo,
+                "title": self.title, "source": self.feed.label, "demo": self.feed.src.demo,
                 "instruments": [{"key": i["key"], "name": i["name"], "available": i["available"],
                                  "symbol": i["symbol"]} for i in self.feed.instruments],
                 "snap": snap, "bot": bot, "record": self.feed.cfg.get("record", {}),
                 "news": self.feed.news(self.feed.clock()),
                 "alerts": self.feed.alerts(),
-                "smt": self.cached("smt", 120, self.feed.smt),
-                "overview": self.cached("overview", 120, self.feed.overview),
+                "smt": self.cached("smt", 30 if self.feed.live else 120, self.feed.smt),
+                "overview": self.cached("overview", 15 if self.feed.live else 120, self.feed.overview),
             }
 
 
@@ -166,8 +166,8 @@ def make_handler(desk: Desk):
 def serve(desk: Desk, host: str = "127.0.0.1", port: int = 8787) -> None:
     httpd = ThreadingHTTPServer((host, port), make_handler(desk))
     httpd.daemon_threads = True
-    log.info("desk on http://%s:%d (%s)", host, port, desk.feed.src.label)
-    print(f"Atlas desk on http://{host}:{port}  ({desk.feed.src.label})", flush=True)
+    log.info("desk on http://%s:%d (%s)", host, port, desk.feed.label)
+    print(f"Atlas desk on http://{host}:{port}  ({desk.feed.label})", flush=True)
     httpd.serve_forever()
 
 

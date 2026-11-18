@@ -235,7 +235,7 @@ function drawChart(snap){
   if($('oFib').checked&&snap.fib){const f=snap.fib;add(f.golden,'Golden 0.618','#f2a65a',0);add(f.golden_far,'0.65','#f2a65a',3);add(f.equilibrium,'Daily 50%','#8b91ab',3);
     add(f.high,'Daily swing high','#7aa2ff',2);add(f.low,'Daily swing low','#7aa2ff',2)}
   if($('oLevels').checked)(snap.levels||[]).filter(l=>!/Golden|Daily/.test(l.name)).forEach(l=>add(l.price,l.name,'#5d6382',1));
-  if($('oPos').checked&&S.data)(S.data.bot.account.positions||[]).filter(p=>p.symbol===snap.symbol).forEach(p=>add(p.entry,`${p.strategy} ${p.side} entry`,p.side==='long'?'#3ecf8e':'#ff6b6b',0));
+  if($('oPos').checked&&S.data)(S.data.bot.account.positions||[]).filter(p=>p.symbol===snap.symbol).forEach(p=>add(p.entry+(snap.basis||0),`${p.strategy} ${p.side} entry`,p.side==='long'?'#3ecf8e':'#ff6b6b',0));
   const lb=bars[bars.length-1];if(lb)$('ohlc').textContent=`${snap.name} ${S.tf} · O ${fx(lb[1])}  H ${fx(lb[2])}  L ${fx(lb[3])}  C ${fx(lb[4])}`;
   requestAnimationFrame(drawOverlay);
 }
@@ -272,7 +272,7 @@ function render(d){
   // chips
   const acc=b.account||{};
   const chips=[
-    [d.demo?'demo':'ok','Prices',d.source],
+    feedChip(d,s),
     [b.killed?'bad':b.alive?'ok':'bad','Bot',b.killed?'STOPPED (kill switch)':b.alive?`running · saved ${b.state_age_s}s ago`:'no heartbeat'],
     [acc.ok?'ok':'bad','Account',acc.ok?`demo #${b.account_id??''}`:'not reachable'],
     [n.loaded?'ok':'warn','News calendar',n.loaded?'loaded':'missing'],
@@ -290,6 +290,7 @@ function render(d){
   // tiles
   $('tName').textContent=s.name;$('tPrice').textContent=fx(s.price);
   const ch=s.change_today;$('tChg').innerHTML=ch?`<span class="${ch.points>=0?'up':'down'}">${ch.points>=0?'+':''}${fmt(ch.points,dp(s.price))} (${fmt(ch.pct,2)}%)</span> since 18:00 open`:'—';
+  if(s.broker_price!=null)$('tChg').innerHTML+=` · broker ${fx(s.broker_price)}`;
   $('tBias').innerHTML=`<span class="${biasCls(s.bias.bias)}">${s.bias.bias.toUpperCase()}</span>`;
   $('tBiasS').textContent=`D ${s.bias.daily} · 4H ${s.bias.h4} · 1H ${s.bias.h1} · ${s.bias.array||''}`;
   const A=s.nearest_above,B=s.nearest_below;
@@ -392,6 +393,11 @@ async function load(){
   catch(e){toast('Desk not reachable: '+e,true)}finally{S.busy=false}
 }
 setInterval(()=>{$('nyTime').textContent=new Date().toLocaleString('en-US',{timeZone:NY,weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' NY'},1000);
-load();setInterval(load,15000);
+function feedChip(d,s){const f=s.feed||{};
+  if(f.feed!=='databento')return[d.demo?'demo':'ok','Prices',d.demo?d.source:`broker ${f.symbol||''} · every 20s`];
+  const age=f.age_s==null?'':f.age_s<60?`${Math.round(f.age_s)}s ago`:`${mins(f.age_s/60)} ago`;
+  return[f.live?'ok':'warn','Prices',`CME ${f.symbol} · ${f.live?'LIVE':'last tick '+age}`]}
+async function tick(){await load();const f=S.data&&S.data.snap&&S.data.snap.feed;setTimeout(tick,f&&f.live?5000:15000)}
+tick();
 </script>
 </body></html>
