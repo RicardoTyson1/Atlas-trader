@@ -162,12 +162,19 @@ class DatabentoLive:
         import databento as db
         return db
 
-    def _history_safe(self) -> None:
-        try:
-            self._load_history()
-        except Exception as e:  # noqa: BLE001
-            log.warning("databento history failed: %s: %s", type(e).__name__, str(e)[:200])
-            self.status = "history failed"
+    def _history_safe(self, tries: int = 8, wait_s: float = 30) -> None:
+        """Databento's history gateway sometimes times out (504): retry, waiting longer each time.
+        Until it loads, the desk keeps showing broker prices for that market."""
+        for i in range(1, tries + 1):
+            try:
+                self._load_history()
+                return
+            except Exception as e:  # noqa: BLE001
+                log.warning("databento history failed (try %d/%d): %s: %s", i, tries, type(e).__name__,
+                            str(e)[:120])
+                self.status = "history failed"
+            if self._stop.wait(wait_s * i):
+                return
 
     def _run(self) -> None:
         # History in its own thread: if a download hangs, the live session still starts after 90 s.

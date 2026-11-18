@@ -153,3 +153,21 @@ def test_desk_uses_live_feed_and_falls_back_to_broker(tmp_path):
     assert snap["broker_price"] is not None and abs(snap["basis"] - (snap["price"] - snap["broker_price"])) < 1e-4
     assert feed.analyse("silver", "5m")["feed"]["feed"] == "broker"
     assert "Databento" in feed.label
+
+
+def test_history_retries_after_a_gateway_timeout():
+    mod, calls = fake_db(NOW)
+    real = mod.Historical
+    n = {"fails": 1}
+
+    class Flaky(real):
+        def __init__(self, key):
+            super().__init__(key)
+            if n["fails"]:
+                n["fails"] -= 1
+                raise RuntimeError("504 The remote gateway timed out")
+
+    mod.Historical = Flaky
+    f = DatabentoLive("k", {"gold": "GC.v.0"}, client_factory=mod, clock=lambda: NOW)
+    f._history_safe(tries=3, wait_s=0)
+    assert f.has("gold") and f.status == "history loaded"
