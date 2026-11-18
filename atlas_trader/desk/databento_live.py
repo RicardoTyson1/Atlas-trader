@@ -162,12 +162,20 @@ class DatabentoLive:
         import databento as db
         return db
 
-    def _run(self) -> None:
+    def _history_safe(self) -> None:
         try:
             self._load_history()
         except Exception as e:  # noqa: BLE001
-            log.warning("databento history failed: %s", type(e).__name__)
+            log.warning("databento history failed: %s: %s", type(e).__name__, str(e)[:200])
             self.status = "history failed"
+
+    def _run(self) -> None:
+        # History in its own thread: if a download hangs, the live session still starts after 90 s.
+        hist = threading.Thread(target=self._history_safe, name="databento-history", daemon=True)
+        hist.start()
+        hist.join(90)
+        if hist.is_alive():
+            log.warning("databento history still loading after 90 s; starting live anyway")
         backoff = 5
         while not self._stop.is_set():
             try:
@@ -198,22 +206,27 @@ class DatabentoLive:
         if cost > self.max_usd:
             self.status = f"history skipped (cost ${cost:.2f} over cap)"
             return
+        # one request per schema for all markets (fast: ~5 s for 4 days of 1m on six markets)
+        hh_all = h.timeseries.get_range(schema="ohlcv-1h", start=start_h, end=end_h, **kw).to_df()
+        mm_all = h.timeseries.get_range(schema="ohlcv-1m", start=start_m, end=end_m, **kw).to_df()
         for sym in syms:
             key = self.by_symbol[sym]
-            one = dict(dataset=DATASET, symbols=[sym], stype_in="continuous")
-            hh = h.timeseries.get_range(schema="ohlcv-1h", start=start_h, end=end_h, **one).to_df()
-            mm = h.timeseries.get_range(schema="ohlcv-1m", start=start_m, end=end_m, **one).to_df()
-            hh = self._clean(hh)
-            mm = self._clean(mm)
+            hh = self._clean(hh_all[hh_all["symbol"] == sym] if "symbol" in hh_all else hh_all)
+            mm = self._clean(mm_all[mm_all["symbol"] == sym] if "symbol" in mm_all else mm_all)
+            if hh.empty and mm.empty:
+                log.warning("databento history %s (%s): no bars", key, sym)
+                continue
             with self._lock:
                 self._hours[key] = hh
                 book = self._mins.setdefault(key, {})
                 for t, r in zip(mm.index, mm.itertuples(index=False)):
-                    book[int(t.timestamp())] = [float(r.open), float(r.high), float(r.low), float(r.close),
-                                                float(r.volume)]
+                    # never overwrite minutes the live session already built
+                    book.setdefault(int(t.timestamp()), [float(r.open), float(r.high), float(r.low),
+                                                         float(r.close), float(r.volume)])
             self.loaded.add(key)
             log.info("databento history %s (%s): %d hours, %d minutes", key, sym, len(hh), len(mm))
-        self.status = "history loaded"
+        if self.status in ("starting", "history failed"):
+            self.status = "history loaded"
 
     @staticmethod
     def _clean(df: pd.DataFrame) -> pd.DataFrame:
@@ -264,7 +277,6 @@ class DatabentoLive:
                 px = lambda v: round(v / 1e9, 9)
                 self.on_second(key, pd.Timestamp(rec.ts_event, unit="ns", tz="UTC"), px(rec.open),
                                px(rec.high), px(rec.low), px(rec.close), float(rec.volume))
-                self.loaded.add(key)
                 n += 1
                 if n % 20000 == 0:
                     self._trim()
