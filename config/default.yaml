@@ -29,17 +29,14 @@ risk:
   risk_per_trade_pct: 1.0         # max loss per trade = 1% of account (~$95 on $9.5k) - lowered from 5% by Ricardo 2026-11-09 (demo)
   max_trades_per_day: 100000      # no cap (demo learning mode since 2026-11-05, Ricardo); was 8
   max_consecutive_losses: 100000  # no cap (demo learning mode); was 3 in a row = done for the day
-  max_open_positions: 1           # one trade at a time (per slot: donchian_trend_1h has its own slot)
-  hedging_account: true           # TradeLocker keeps every position separate (checked 2026-11-17: netting
-                                  # exists only as a deprecated client-side SDK option, position_netting=False,
-                                  # which the bot never uses). false = never open a 2nd position on a symbol.
+  max_open_positions: 1           # one trade at a time
   max_lots: 2.0                   # hard cap (history: up to 4 lots on ~$2k)
   max_room_fraction_per_trade: 0.6   # a trade may use at most 60% of the room left to the day/account stop
   cooldown_after_loss_minutes: 0  # no cooldown (demo learning mode); was 15
   max_sizing_equity: 10000        # size from real money only, never bonus credit
   guardian: true                  # also police MANUAL trades: no stop / adding / during halts -> closed
   core_hours: "08:00-11:00"       # full risk only here (NY): the tested, profitable window
-  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (no strategy enters outside 08-11 for now)
+  off_hours_risk_pct: 1.0         # all other hours: 1% per trade (evening sweep 20-24, 1H Donchian any time)
   min_target_r: 1.0               # never take a trade whose target pays < 1x risk at the actual fill price
   max_spread_mult: 3.0            # skip an entry when the live spread is over 3x normal (news spikes, rollover)
 
@@ -128,27 +125,11 @@ strategies:
   # st_confluence REMOVED 2026-11-14 (Ricardo: keep only improvements). With full costs it made +1.7R over
   # 113 trades (35.4% wins, newer half -0.6R) - below the bot's average on both win rate and R, and it
   # took the one-trade slot from better setups. Code kept (atlas_trader/strategies/st_confluence.py).
-  # momentum_rsi = RSI crosses 50 on an aggressive candle (with the 50 EMA trend) -> ride it:
-  # stop beyond the candle, trailing stop, aggressive candles pull the stop to mid-candle.
-  # Status: UNPROVEN. Re-enabled 2026-11-09 (Ricardo) alongside smc_ob + st_confluence.
-  # momentum_rsi REMOVED 2026-11-17 (Ricardo): worst model over 16 yrs (library_16y_study: -210.5R
-  # without the volatility switch; COMEX 2010-2022 -0.18R/trade, t=-4.7). Block kept below, commented.
-  # - name: momentum_rsi
-  #   instruments: [XAUUSD.R]
-  #   timeframe: 5m
-  #   history_bars: 600
-  #   params:                         # shoot-out #1: 5m, disp 1.0, EMA trend = +0.23R/trade, both halves positive
-  #     disp_atr: 1.0
-  #     trend_filter: true
-  #     trail_start_r: 1.0             # trail from +1R (replay 2026-11-05: +55R vs +34R when trailing from first profit)
-  #     trail_buf_atr: 0.3
-  #     spike_atr: 2.0
-  #     hours: "08:00-11:00"          # 08-11 only. All hours tried 2026-11-11..13 on the demo: 14 trades, 4 wins,
-  #                                   # -$580 (backtest: -210R / +111R per half vs +43R / +120R at 08-11).
-  #     max_candle_atr: 2.5           # no-chase: skip exhaustion spike candles (range > 2.5 x ATR)
-  #     max_run_atr: 3.0              # no-chase: skip if price already ran > 3 x ATR in the last hour
-  #     run_bars: 12                  # (12 x 5m). 08-11 + no-chase: +42.6R / +119.7R per half vs
-  #                                   # +15.7R / +75.9R without (docs/RESULTS_NO_CHASE_2026-11-06.md)
+  # momentum_rsi REMOVED 2026-11-17 (Ricardo: keep what is recommended). 16 years of COMEX gold
+  # (research/library_16y_study.py): 2,419 trades at 08-11, -143.0R; older half -41.8R even with the
+  # volatility switch. Its 2023-26 profit came from gold's 2025-26 run. Code kept
+  # (atlas_trader/strategies/momentum_rsi.py); live settings were: disp_atr 1.0, trend_filter,
+  # trail_start_r 1.0, trail_buf_atr 0.3, spike_atr 2.0, max_candle_atr 2.5, max_run_atr 3.0, run_bars 12.
 
   # 2026-11-11 to 11-13 every strategy ran ALL HOURS on the demo: 19 trades, 5 wins, -$791.
   # Back to 08-11 NY on 2026-11-13 (Ricardo), matching the test results below.
@@ -206,22 +187,26 @@ strategies:
     partial: {at_r: 1.0, fraction: 0.5, breakeven: true}
     trail_own_tf: true
 
-  # MULTI-DAY TREND (Ricardo, 2026-11-17): 1H Donchian breakout. Close above the 55-bar high -> long
-  # (below the 55-bar low -> short); stop 2 ATR; no target; exit on a close through the 20-bar channel.
-  # The ONLY setup that passed the 16-year COMEX library test (research/library_16y_study.py): 1,432
-  # trades, 30.7% wins, +0.061R, +86.7R, profitable in both halves and 4 of 6 periods - but t 1.06, NOT
-  # strong. Tested holding overnight/weekends and without the volatility switch, so: holds through the
-  # daily break, ignores the switch, 0.5% risk, its own position slot. Still closed before red-folder news.
+  # 1H DONCHIAN TREND (Ricardo, 2026-11-17: "incorporate as recommended"). The ONLY setup of 31 that
+  # passed 16 years of COMEX gold (research/library_16y_study.py): buy a close above the 55-hour high
+  # (sell below the 55-hour low), stop 2 ATR, exit on a close beyond the 20-hour channel, no target.
+  # 1,432 trades, 30.7% wins, +86.7R (2010-18 +31.0R / 2019-26 +55.7R), 4 of 6 periods positive; NOT
+  # strong (t 1.06). It only works HELD OVERNIGHT (flat every day: -54.1R). Ricardo chose: hold
+  # Mon-Thu, flat every Friday 16:50 (no weekend gaps) - research/donchian_live_check.py:
+  # alone 1,641 trades, 32.7% wins, +20.8R (+5.2R / +15.6R per half, 4 of 6 periods) = a THIN pass
+  # (+0.013R/trade; the weekends were worth ~66R of the +86.7R). One-slot lineup: +25.8R
+  # (+4.7R / +21.1R) vs -40.8R without it; in a trade at 08:00 NY on 37% of weekdays.
+  # Lowest priority; it ignores the volatility switch (the switch cut it to +19.8R).
+  # Watch: GatesFX overnight swap is NOT in the test (not shown by their API) - check the swap on
+  # each trade; ~2 nights per trade on average. Judge after ~30 trades.
   - name: donchian_trend
-    label: donchian_trend_1h
     instruments: [XAUUSD.R]
     timeframe: 1H
     history_bars: 300
     params: {entry_bars: 55, exit_bars: 20}
     hold_overnight: true
-    risk_pct: 0.5
-    ignore_regime: true
-    own_slot: true
+    use_regime: false
+    trail_own_tf: true
 
 # Volatility switch (Ricardo, 2026-11-16): no NEW trades on days when gold has been moving less than
 # usual. volr = 20-day average daily range / 250-day median of that average (completed daily candles).
