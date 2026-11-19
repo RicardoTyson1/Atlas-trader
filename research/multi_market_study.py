@@ -31,9 +31,21 @@ DATA: Path = Path("data/multi")
 
 
 def load(root: str, tf: str) -> pd.DataFrame:
-    d = pd.read_csv(DATA / f"{root}_{tf}.csv", parse_dates=["time"], index_col="time")
-    d.index = pd.to_datetime(d.index, utc=True).tz_convert(NY)
-    return d[["open", "high", "low", "close", "volume"]].astype("float64")
+    """Compact load (1 GB server): cached .npz with int64 UTC ns + float32 OHLC; built once from CSV."""
+    cache = DATA / f"{root}_{tf}.npz"
+    if not cache.exists():
+        parts = []
+        for ch in pd.read_csv(DATA / f"{root}_{tf}.csv", usecols=["time", "open", "high", "low", "close"],
+                              dtype={k: "float32" for k in ("open", "high", "low", "close")}, chunksize=200_000):
+            ch["time"] = pd.to_datetime(ch["time"], utc=True).dt.as_unit("ns").astype("int64")
+            parts.append(ch)
+        d = pd.concat(parts)
+        np.savez(cache, t=d["time"].values, **{k: d[k].values for k in ("open", "high", "low", "close")})
+        del d, parts
+        gc.collect()
+    z = np.load(cache)
+    idx = pd.DatetimeIndex(z["t"].astype("datetime64[ns]")).tz_localize("UTC").tz_convert(NY)
+    return pd.DataFrame({k: z[k] for k in ("open", "high", "low", "close")}, index=idx)
 
 
 def atr(d: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -58,7 +70,6 @@ def simulate(d: pd.DataFrame, i_entry: int, side: int, stop: float, target: floa
     """Enter at OPEN of bar i_entry. Stop checked before target in the same bar (conservative).
     Exit at close of bar i_last at the latest, or at close of a bar where exit_mask is set."""
     o, h, l, c = (d[k].values for k in ("open", "high", "low", "close"))
-    entry = o[i_entry]
     i_last = min(i_last, len(o) - 1)
     for i in range(i_entry, i_last + 1):
         if side > 0:
@@ -77,7 +88,8 @@ def simulate(d: pd.DataFrame, i_entry: int, side: int, stop: float, target: floa
 
 
 def trade_row(d, root, i_entry, side, stop, target, i_last, exit_mask=None):
-    entry = d["open"].values[i_entry]
+    entry = float(d["open"].values[i_entry])
+    stop = float(stop)
     risk = abs(entry - stop)
     if risk <= 0 or not np.isfinite(risk):
         return None
@@ -124,6 +136,7 @@ def smt(a_root: str, b_root: str, win: str) -> pd.DataFrame:
     A, B = load(a_root, "5m"), load(b_root, "5m")
     idx = A.index.intersection(B.index)
     A, B = A.loc[idx], B.loc[idx]
+    gc.collect()
     (rh0, rm0), (rh1, rm1), (th0, tm0), (th1, tm1) = WINDOWS[win]
     mins = idx.hour * 60 + idx.minute
     ref = (mins >= rh0 * 60 + rm0) & (mins < rh1 * 60 + rm1)
@@ -132,13 +145,15 @@ def smt(a_root: str, b_root: str, win: str) -> pd.DataFrame:
     rows = []
     frames = {a_root: A, b_root: B}
     allpos = np.arange(len(idx))
-    rdays = pd.Series(allpos[ref]).groupby(day[ref]).agg(list)
-    tdays = pd.Series(allpos[trd]).groupby(day[trd]).agg(list)
-    for dday, tl in tdays.items():
-        rl = rdays.get(dday)
-        if rl is None or len(rl) < 12 or len(tl) < 12:
+    dcode = day.asi8
+    rpos, tpos_all = allpos[ref], allpos[trd]
+    rcode, tcode = dcode[ref], dcode[trd]
+    del ref, trd, mins
+    for dday in np.unique(tcode):
+        rp = rpos[np.searchsorted(rcode, dday, "left"):np.searchsorted(rcode, dday, "right")]
+        tl = tpos_all[np.searchsorted(tcode, dday, "left"):np.searchsorted(tcode, dday, "right")]
+        if len(rp) < 12 or len(tl) < 12:
             continue
-        rp = np.array(rl)
         lv = {r: (f["high"].values[rp].max(), f["low"].values[rp].min()) for r, f in frames.items()}
         tpos = np.array(tl)
         done = False
