@@ -6,12 +6,13 @@ A private dashboard built around Ricardo's own way of trading (rule book: `/mnt/
 -98R and all his pieces stacked lost -129R after costs. The desk shows where his rules line up and scores every read.
 
 ## What is on it
-- Markets: gold, silver, oil, S&P 500, US30, Nasdaq 100, dollar index (`config/desk.yaml`; first symbol found on the broker is used).
+- Markets: gold, silver, oil, S&P 500, US30, Nasdaq 100, dollar index, 10Y T-Note (`config/desk.yaml`; first symbol found on the broker is used, or the Databento live feed).
 - Bias (4H + daily), daily Fibonacci leg with golden ratio 0.618-0.65 and the demand/supply zone, solid 4H candle out of the zone, retest level.
 - RSI(14) on 1m / 5m / 15m / 1H / 4H with his bands: buy 16.5-20, sell 80-85.
 - FVGs and order blocks on 5m / 15m, session levels (PDH/PDL, Asia, London, NY, midnight open), structure (BOS / CHoCH) per timeframe.
 - His 6-point checklist and a plain-words desk read. SMT divergence pairs.
-- Red-folder USD news with countdown and blackout.
+- Red-folder USD news (free Forex Factory feed, the same file the bot's blackouts read): live per-second countdown per event, and each event's bot windows (no new entries / flat / back on).
+- Dollar & yields vs gold: synthetic DXY and 10Y yields (via ZN), today's move, return correlation with gold on 15m and 1H, and a tailwind / headwind read. Gold vs DXY and gold vs ZN are also in the SMT panel. Context only, not a tested edge.
 - Bot: running / stopped, balance, today's P&L, open trades (bot and manual), today's closed trades, every model with its record.
 - Desk reads scorecard: a read is logged when 5 of 6 checks line up; scored 2 x ATR(15m) target vs 1 x ATR stop.
 - His record and rules (manual account findings, guardrails, 16-year test results).
@@ -50,7 +51,8 @@ YM, NQ) on Rick's live Databento subscription:
 * Futures sit a little apart from the broker's CFD prices (the basis). The page shows the broker price
   next to the futures price, and moves the bot's trade-entry lines by the basis so they sit where the
   trade really is. The bot itself still trades and reads broker prices only; nothing here changes it.
-* The dollar index is not on CME, so it stays on broker prices.
+* The dollar index is not on CME (DX trades on ICE). It is built from the six CME currency futures (6E 6J 6B 6C SEK 6S) with the ICE weights; futures carry puts the level slightly off spot DXY, moves and swings track it. If the krona leg has no data, `dollar_fallback.sek` is used and the panel says so. If history for the legs would push the cost over `max_history_usd`, the main markets still load and the legs fill from the live replay.
+* 10Y yields: CME 10-year T-Note (ZN.v.0). ZN up = yields down. Dollar index and ZN have `reads: false`: no desk reads are logged for them.
 
 ### Background desk reads and broker load (2026-11-22)
 
