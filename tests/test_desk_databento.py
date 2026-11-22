@@ -191,3 +191,53 @@ def test_late_history_restarts_live_to_fill_the_gap():
     start = f._replay_start()
     assert start == f._hist_end and f._resync is None
     assert f.minutes("gold").index[-1] < start            # minutes from the gap on are rebuilt by replay
+
+
+def test_weekend_replay_start_follows_what_databento_allows():
+    f = DatabentoLive("k", {"gold": "GC.v.0"}, client_factory=object(),
+                      clock=lambda: pd.Timestamp("2026-11-22 03:51", tz="UTC"))
+    fri = pd.Timestamp("2026-11-20 21:59", tz="UTC")
+    f.on_second("gold", fri, 1, 1, 1, 1, 1)
+    msg = "Invalid start time. Must be 2026-11-21T08:15:00Z or later, or 0"
+    assert f._learn_min_start(msg) and not f._learn_min_start("Gateway timeout")
+    start = f._replay_start()
+    assert start == pd.Timestamp("2026-11-21 08:16", tz="UTC")
+    assert len(f.minutes("gold")) == 1                  # Friday's bars are kept
+
+
+def test_background_reads_need_no_broker_calls(tmp_path):
+    from atlas_trader.desk.feed import DemoSource, DeskFeed
+    mod, _ = fake_db(NOW)
+    live = DatabentoLive("k", {"gold": "GC.v.0"}, client_factory=mod, clock=lambda: NOW)
+    live._load_history()
+
+    class Counting(DemoSource):
+        demo = False
+        calls = 0
+
+        def bars(self, *a, **k):
+            Counting.calls += 1
+            return super().bars(*a, **k)
+
+    cfg = {"instruments": [{"key": "gold", "name": "Gold", "symbols": ["XAUUSD"]},
+                           {"key": "silver", "name": "Silver", "symbols": ["XAGUSD"]}]}
+    feed = DeskFeed(cfg, Counting(), state_dir=tmp_path, live=live, clock=lambda: NOW)
+    assert feed.background_once() == 1                  # gold (live) checked; silver (broker) skipped
+    assert Counting.calls == 0
+
+
+def test_failed_broker_call_backs_off(tmp_path):
+    from atlas_trader.desk.feed import DemoSource, DeskFeed
+
+    class Failing(DemoSource):
+        calls = 0
+
+        def bars(self, *a, **k):
+            Failing.calls += 1
+            raise RuntimeError("429 Too Many Requests")
+
+    feed = DeskFeed({"instruments": [{"key": "gold", "name": "Gold", "symbols": ["XAUUSD"]}]}, Failing(),
+                    state_dir=tmp_path)
+    feed.broker_bars("gold", "1m")
+    feed.broker_bars("gold", "1m")
+    assert Failing.calls == 1

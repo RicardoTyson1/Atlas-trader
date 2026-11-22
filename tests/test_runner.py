@@ -561,6 +561,7 @@ def test_volatility_switch_off_when_not_configured(cfg):
     assert runner._quiet_market("NAS100", pd.Timestamp("2026-01-06 09:00", tz="America/New_York")) is None
 
 
-def test_live_config_has_volatility_switch():
+def test_live_config_volatility_switch_is_off():
+    # Ricardo 2026-11-22: "turn off" (it blocked Wed-Fri Nov 18-20). Set 1.2 to switch it back on.
     from atlas_trader.config import load_config
-    assert load_config("config/default.yaml").regime["min_volr"] == 1.2
+    assert not load_config("config/default.yaml").regime["min_volr"]

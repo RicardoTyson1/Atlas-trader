@@ -189,23 +189,56 @@ class DeskFeed:
                 log.warning("desk: live bars %s %s failed: %r", key, tf, e)
         return self.broker_bars(key, tf)
 
-    def broker_bars(self, key: str, tf: str) -> pd.DataFrame:
+    def broker_bars(self, key: str, tf: str, ttl: float | None = None) -> pd.DataFrame:
         ins = self.inst(key)
         if not ins or not ins["available"]:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         ck = (key, tf)
         with self._lock:
             hit = self._bars.get(ck)
-            if hit and _time.monotonic() - hit[0] < TTL[tf]:
+            if hit and _time.monotonic() - hit[0] < (ttl or TTL[tf]):
                 return hit[1]
         try:
             df = self.src.bars(ins["symbol"], tf, COUNT[tf])
         except Exception as e:  # noqa: BLE001 - show stale data rather than nothing
             log.warning("desk: bars %s %s failed: %r", key, tf, e)
-            return hit[1] if hit else pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            old = hit[1] if hit else pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            with self._lock:      # back off for a full TTL: retrying at once is what feeds rate limits
+                self._bars[ck] = (_time.monotonic(), old)
+            return old
         with self._lock:
             self._bars[ck] = (_time.monotonic(), df)
         return df
+
+    # ------------------------------------------------------------------ background desk reads
+    def background_once(self) -> int:
+        """Check every market for a desk read (and score open ones) whether or not the page is open.
+        Uses no broker calls for markets on the live feed. Returns how many markets were checked."""
+        n = 0
+        for ins in self.instruments:
+            if not ins["available"]:
+                continue
+            if not self.uses_live(ins["key"]) and not getattr(self.src, "demo", False):
+                continue          # broker-priced markets: only when someone has the page open
+            try:
+                self.analyse(ins["key"], with_chart=False, with_broker=False)
+                n += 1
+            except Exception as e:  # noqa: BLE001 - one market must not stop the others
+                log.warning("desk: background read %s failed: %r", ins["key"], e)
+        try:
+            self.alerts()
+        except Exception as e:  # noqa: BLE001
+            log.warning("desk: scoring desk reads failed: %r", e)
+        return n
+
+    def start_background(self, every_s: float = 60) -> threading.Thread:
+        def loop():
+            stop = threading.Event()
+            while not stop.wait(every_s):
+                self.background_once()
+        t = threading.Thread(target=loop, name="desk-reads", daemon=True)
+        t.start()
+        return t
 
     # ------------------------------------------------------------------ news
     def news(self, now: pd.Timestamp) -> dict:
@@ -239,7 +272,8 @@ class DeskFeed:
         return out
 
     # ------------------------------------------------------------------ one instrument
-    def analyse(self, key: str, chart_tf: str = "5m", with_chart: bool = True) -> dict:
+    def analyse(self, key: str, chart_tf: str = "5m", with_chart: bool = True,
+                with_broker: bool = True) -> dict:
         now = self.clock()
         ins = self.inst(key)
         if not ins:
@@ -286,10 +320,11 @@ class DeskFeed:
             "session": A.session_now(now),
             "feed": self.feed_info(key),
         }
-        if self.uses_live(key) and price is not None:
+        if with_broker and self.uses_live(key) and price is not None:
             # the bot trades the broker's CFD; futures sit a little apart (the basis). Trade lines on the
-            # chart are shifted by it so they land where the trade really is.
-            bb = self.broker_bars(key, "1m")
+            # chart are shifted by it so they land where the trade really is. Once a minute is plenty:
+            # the desk must never eat the bot's TradeLocker rate limit.
+            bb = self.broker_bars(key, "1m", ttl=60)
             bp = float(bb["close"].iloc[-1]) if len(bb) else None
             out["broker_price"] = bp
             out["basis"] = None if bp is None else round(price - bp, 5)
@@ -430,7 +465,7 @@ class DeskFeed:
             return {}, None
 
     def _account(self) -> dict:
-        if self._acct_cache and _time.monotonic() - self._acct_cache[0] < 15:
+        if self._acct_cache and _time.monotonic() - self._acct_cache[0] < 30:
             return self._acct_cache[1]
         try:
             a = self.src.account()

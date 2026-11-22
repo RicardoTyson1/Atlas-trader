@@ -16,6 +16,7 @@ The API key is read from the environment and never logged.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time as _time
 from datetime import timedelta
@@ -74,6 +75,7 @@ class DatabentoLive:
         self._stop = threading.Event()
         self._hist_end: pd.Timestamp | None = None
         self._resync: pd.Timestamp | None = None
+        self._min_start: pd.Timestamp | None = None
         self._live = None
         self._thread: threading.Thread | None = None
 
@@ -199,6 +201,14 @@ class DatabentoLive:
                 self._stream()
                 backoff = 5
             except Exception as e:  # noqa: BLE001 - never kill the desk; reconnect
+                if self._learn_min_start(str(e)):
+                    # replay asked for data older than Databento keeps (weekends): retry at once
+                    # from the earliest time it allows (nothing traded in between)
+                    log.info("databento live: replay start moved to %s", self._min_start)
+                    self.status = "reconnecting"
+                    if self._stop.wait(2):
+                        break
+                    continue
                 log.warning("databento live dropped: %s: %s", type(e).__name__, str(e)[:200])
                 self.status = "reconnecting"
             if self._stop.wait(backoff):
@@ -257,6 +267,22 @@ class DatabentoLive:
         df.index = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
         return df[~df.index.duplicated(keep="last")].sort_index()
 
+    _MIN_START = re.compile(r"Invalid start time\. Must be (\S+?) or later")
+
+    def _learn_min_start(self, msg: str) -> bool:
+        """Databento rejects a replay start older than what it keeps and says the earliest it allows
+        ("Invalid start time. Must be 2026-11-21T08:15:00Z or later, or 0"). Remember it."""
+        m = self._MIN_START.search(msg)
+        if not m:
+            return False
+        try:
+            t = pd.Timestamp(m.group(1))
+        except ValueError:
+            return False
+        t = t.tz_localize("UTC") if t.tz is None else t.tz_convert("UTC")
+        self._min_start = t + pd.Timedelta(minutes=1)
+        return True
+
     def _replay_start(self) -> pd.Timestamp:
         """Where the live replay starts: the last minute we hold (re-built from scratch), max 23 h back."""
         now = self.clock()
@@ -267,6 +293,8 @@ class DatabentoLive:
         if self._resync is not None:
             start, self._resync = min(start, self._resync), None
         start = max(start, floor)
+        if self._min_start is not None and start < self._min_start:
+            start = self._min_start
         cut = int(start.timestamp())
         with self._lock:                                  # the replay rebuilds these minutes
             for book in self._mins.values():
