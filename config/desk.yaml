@@ -14,13 +14,20 @@ desk:
     - {key: spx,    name: S&P 500,       symbols: [SPX500.R, US500.R, SPX500, US500]}
     - {key: us30,   name: US30,          symbols: [US30.R, US30]}
     - {key: nas100, name: Nasdaq 100,    symbols: [NAS100.R, NAS100]}
-    - {key: dxy,    name: Dollar index,  symbols: [DXY.R, USDX.R, DXY, USDX]}
+    - {key: dxy,    name: Dollar index,  symbols: [DXY.R, USDX.R, DXY, USDX], reads: false}
+    - {key: zn,     name: 10Y T-Note,    symbols: [], reads: false}   # CME ZN: up = 10-year yields down
+  # reads: false = shown for context (correlation, SMT); no desk reads logged on the scorecard.
   # Live CME futures from Databento (Rick's live subscription), updated every second. Continuous front
-  # month by volume. Markets not listed here (dollar index) stay on broker prices. History (1m for 4 days,
-  # 1h for 240 days) is downloaded once at start, only if its cost is under max_history_usd.
+  # month by volume. History (1m for 4 days, 1h for 240 days) is downloaded once at start, only if its
+  # cost is under max_history_usd. All of these are CME Globex, covered by the same live subscription.
   databento:
     enabled: true
-    symbols: {gold: GC.v.0, silver: SI.v.0, oil: CL.v.0, spx: ES.v.0, us30: YM.v.0, nas100: NQ.v.0}
+    symbols: {gold: GC.v.0, silver: SI.v.0, oil: CL.v.0, spx: ES.v.0, us30: YM.v.0, nas100: NQ.v.0, zn: ZN.v.0}
+    # No DXY future on CME: the dollar index is built from the six CME currency futures with the ICE
+    # weights. Level sits slightly off spot DXY (futures carry); moves and swings track it.
+    dollar_index: {eur: 6E.v.0, jpy: 6J.v.0, gbp: 6B.v.0, cad: 6C.v.0, sek: SEK.v.0, chf: 6S.v.0}
+    # If a thin leg (krona) has no data, use this rate (USD per unit) so the index still shows (approx).
+    dollar_fallback: {sek: 0.105}
     max_history_usd: 2.0
   # SMT divergence pairs: [market, partner, inverse]. inverse = they normally move opposite ways.
   smt_pairs:
@@ -29,6 +36,7 @@ desk:
     - [spx, us30, false]
     - [spx, nas100, false]
     - [oil, spx, false]
+    - [gold, zn, false]       # gold and T-Notes both rise when yields fall
   # Log a desk read when this many of the 6 checks line up (default: all but one).
   alert_min_checks: 5
   # Guardrails (Ricardo 2026-11-18: "the way I trade, not the way I spiral to a blown account").

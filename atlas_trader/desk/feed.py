@@ -158,8 +158,9 @@ class DeskFeed:
         self.instruments = []
         for ins in desk_cfg.get("instruments", []):
             sym = next((s for s in ins.get("symbols", []) if source.resolve(s)), None)
-            self.instruments.append({**ins, "symbol": sym, "available": sym is not None})
-            if sym is None:
+            on_live = live is not None and getattr(live, "covers", lambda k: False)(ins["key"])
+            self.instruments.append({**ins, "symbol": sym, "available": sym is not None or on_live})
+            if sym is None and not on_live:
                 log.warning("desk: no symbol found on the broker for %s (tried %s)", ins["key"], ins.get("symbols"))
         self.alerts_file = self.state_dir / "desk_alerts.json"
 
@@ -191,7 +192,7 @@ class DeskFeed:
 
     def broker_bars(self, key: str, tf: str, ttl: float | None = None) -> pd.DataFrame:
         ins = self.inst(key)
-        if not ins or not ins["available"]:
+        if not ins or not ins["available"] or not ins.get("symbol"):
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         ck = (key, tf)
         with self._lock:
@@ -216,8 +217,8 @@ class DeskFeed:
         Uses no broker calls for markets on the live feed. Returns how many markets were checked."""
         n = 0
         for ins in self.instruments:
-            if not ins["available"]:
-                continue
+            if not ins["available"] or ins.get("reads") is False:
+                continue          # context-only markets (dollar, T-Notes) log no reads
             if not self.uses_live(ins["key"]) and not getattr(self.src, "demo", False):
                 continue          # broker-priced markets: only when someone has the page open
             try:
@@ -260,10 +261,17 @@ class DeskFeed:
         evs.sort()
         upcoming = [(t, ti) for t, ti in evs if t + pd.Timedelta(minutes=after) >= now]
         out = {"blackout": False, "next_title": None, "next_time": None, "minutes_to": None,
-               "minutes_before": before, "minutes_after": after, "upcoming": [],
-               "loaded": bool(events)}
+               "minutes_before": before, "minutes_after": after, "no_entry_minutes_before": no_entry,
+               "upcoming": [], "loaded": bool(events), "now": now.isoformat()}
         for t, ti in upcoming[:8]:
-            out["upcoming"].append({"time": t.isoformat(), "title": ti})
+            # the bot's own windows (config/default.yaml news_blackouts): no new entries from
+            # no_entry_from, open trades closed from flat_from, back to normal at until
+            out["upcoming"].append({
+                "time": t.isoformat(), "title": ti,
+                "no_entry_from": (t - pd.Timedelta(minutes=before + no_entry)).isoformat(),
+                "flat_from": (t - pd.Timedelta(minutes=before)).isoformat(),
+                "until": (t + pd.Timedelta(minutes=after)).isoformat(),
+                "active": t - pd.Timedelta(minutes=before + no_entry) <= now <= t + pd.Timedelta(minutes=after)})
         if upcoming:
             t, ti = upcoming[0]
             mins = (t - now).total_seconds() / 60
@@ -380,6 +388,47 @@ class DeskFeed:
             out.append({"a": ia["name"], "b": ib["name"], "inverse": inv, **res})
         return out
 
+    # ------------------------------------------------------------------ dollar & yields vs gold
+    def macro(self, base: str = "gold") -> dict:
+        """Dollar index and 10Y T-Note next to gold: today's move, rolling correlation of returns on
+        15m (last ~1 day) and 1H (last ~5 days), and a plain read (tailwind / headwind / mixed).
+        Gold normally moves against the dollar and against yields; a positive number = decoupled."""
+        now = self.clock()
+        out = {"base": (self.inst(base) or {}).get("name", base), "markets": [], "corr": [], "read": None}
+        gold = {tf: self.bars(base, tf) for tf in ("15m", "1H")}
+        moves = {}
+        for key, label, short, sign in (("dxy", "Dollar index", "DXY", 1),
+                                        ("zn", "10Y yields (via T-Note)", "10Y yield", -1)):
+            ins = self.inst(key)
+            if not ins or not ins["available"]:
+                out["markets"].append({"key": key, "name": label, "available": False})
+                continue
+            b15 = self.bars(key, "15m")
+            price = float(b15["close"].iloc[-1]) if len(b15) else None
+            ch = self._change_today(b15, now, price)
+            moves[key] = None if ch is None else ch["pct"] * sign      # for yields: T-Note up = yields down
+            out["markets"].append({"key": key, "name": label, "available": price is not None,
+                                   "instrument": ins["name"], "price": price, "change_today": ch,
+                                   "direction": None if ch is None else
+                                   ("up" if ch["pct"] * sign > 0.02 else "down" if ch["pct"] * sign < -0.02 else "flat"),
+                                   "feed": self.feed_info(key)})
+            for tf, n in (("15m", 96), ("1H", 120)):
+                r = A.return_corr(gold[tf], self.bars(key, tf), n)
+                if r is not None:
+                    r["r"] = round(r["r"] * sign, 2)
+                out["corr"].append({"pair": f"{out['base']} / {short}", "tf": tf, "bars": n,
+                                    **(r or {"r": None, "n": 0}),
+                                    "note": None if r is None else A.corr_note(r["r"])})
+        d, y = moves.get("dxy"), moves.get("zn")
+        if d is not None and y is not None:
+            if d < -0.05 and y < -0.02:
+                out["read"] = {"tone": "bull", "text": f"Dollar and yields both down today: tailwind for {out['base'].lower()}."}
+            elif d > 0.05 and y > 0.02:
+                out["read"] = {"tone": "bear", "text": f"Dollar and yields both up today: headwind for {out['base'].lower()}."}
+            else:
+                out["read"] = {"tone": "", "text": "Dollar and yields not lined up today: no macro tilt."}
+        return out
+
     # ------------------------------------------------------------------ desk alerts (honest scoring)
     def _load_alerts(self) -> list[dict]:
         try:
@@ -397,6 +446,8 @@ class DeskFeed:
         """Log a read when all but one of his checks line up (and never in a news blackout), then
         score it later: did price go 2 x ATR(15m) his way before 1 x ATR against? Rough, but honest."""
         ck = snap["checklist"]
+        if (self.inst(snap["key"]) or {}).get("reads") is False:
+            return
         if ck["direction"] is None or snap["price"] is None or not snap.get("atr15"):
             return
         need = int(self.cfg.get("alert_min_checks", ck["of"] - 1))

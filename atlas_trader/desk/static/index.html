@@ -95,6 +95,7 @@ td.r,th.r{text-align:right}
 .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line2);font:600 10.5px var(--mono);color:var(--mut)}
 .tag.long,.tag.bull{color:var(--up);border-color:var(--up)}.tag.short,.tag.bear{color:var(--down);border-color:var(--down)}
 .tag.warn{color:var(--warn);border-color:var(--warn)}
+tr.nb-on td{background:rgba(255,107,107,.08)}
 .btn{background:var(--panel2);border:1px solid var(--line2);color:var(--text);font:600 12px var(--mono);padding:6px 10px;cursor:pointer}
 .btn:hover{border-color:var(--acc)}
 .btn.acc{background:var(--acc);color:#1b1206;border-color:var(--acc)}
@@ -170,6 +171,7 @@ dialog input{width:100%;padding:8px;margin:10px 0;background:#10131f;border:1px 
   <div class="col">
     <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">Your checklist</span><span class="tag" id="ckDir" style="margin-left:auto">—</span></div><div class="pb" id="checklist"></div></div>
     <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">RSI(14) extremes · buy 16.5–20 · sell 80–85</span></div><div class="pb"><div class="rsi" id="rsi"></div></div></div>
+    <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">Dollar &amp; yields vs gold</span></div><div class="pb" id="macro"></div></div>
     <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">Bot · guardrails</span><span class="tag" id="botState" style="margin-left:auto">—</span></div><div class="pb" id="bot"></div></div>
     <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">Your record · your rules</span></div><div class="pb" id="record"></div></div>
     <div class="panel corner"><div class="ph"><span class="dot"></span><span class="lbl">Models</span></div><div class="pb" id="models"></div></div>
@@ -298,8 +300,7 @@ function render(d){
   $('tBelow').textContent=B?fx(B.price):'—';$('tBelowS').textContent=B?`${B.name} · −${fmt(s.price-B.price,dp(s.price))}`:'';
   const c=s.checklist;$('tScore').textContent=`${c.score} of ${c.of}`;$('tScoreS').textContent=c.direction?`${c.direction} read`:'no direction';
   $('tScoreM').style.width=(c.score/c.of*100)+'%';
-  $('tNews').textContent=n.blackout?'BLACKOUT':n.minutes_to!=null?mins(n.minutes_to):'none';
-  $('tNews').style.color=n.blackout?'var(--down)':'';$('tNewsS').textContent=n.next_title?`${n.next_title} · ${nyT(n.next_time)}`:'no red-folder event this week';
+  S.news=n;newsTick();
   $('brief').textContent=s.brief;$('briefTime').textContent=nyT(s.time)+' NY';
   // checklist
   $('ckDir').textContent=c.direction?c.direction.toUpperCase():'NO BIAS';$('ckDir').className='tag '+(c.direction||'');
@@ -327,8 +328,16 @@ function render(d){
   const lv=(s.levels||[]).filter(l=>l.price!=null).sort((a,b)=>b.price-a.price);
   $('levels').innerHTML=`<table>${lv.map(l=>`<tr><td>${esc(l.name)}</td><td class="r ${l.price>s.price?'down':'up'}">${fx(l.price)}</td></tr>`).join('')}</table>`;
   // news
-  $('news').innerHTML=n.upcoming.length?`<table>${n.upcoming.map(e=>`<tr><td>${nyT(e.time)}</td><td>${esc(e.title)}</td></tr>`).join('')}</table>
-    <div class="honest">No new bot entries ${n.minutes_before} min before to ${n.minutes_after} min after each one; open trades are closed.</div>`:'<div class="empty">No red-folder USD events left this week.</div>';
+  $('news').innerHTML=n.upcoming.length?`<table><tr><th>When (NY)</th><th>Event</th><th class="r">In</th></tr>${n.upcoming.map((e,i)=>`<tr class="${e.active?'nb-on':''}"><td>${nyT(e.time)}</td><td>${esc(e.title)}<br><span class="muted">no entries ${hm(e.no_entry_from)}–${hm(e.until)} · flat from ${hm(e.flat_from)}</span></td><td class="r" data-cd="${esc(e.time)}">—</td></tr>`).join('')}</table>
+    <div class="honest">Bot: no new entries ${n.minutes_before+(n.no_entry_minutes_before||0)} min before each release, open trades closed ${n.minutes_before} min before, back on ${n.minutes_after} min after. Source: Forex Factory, high-impact USD.</div>`:'<div class="empty">No red-folder USD events left this week. Next week\'s calendar loads on Sunday.</div>';
+  newsTick();
+  // dollar & yields
+  const mc=d.macro;
+  $('macro').innerHTML=mc?`${mc.read?`<div class="ck"><div><div class="t"><span class="tag ${mc.read.tone}">${mc.read.tone==='bull'?'tailwind':mc.read.tone==='bear'?'headwind':'mixed'}</span> ${esc(mc.read.text)}</div></div></div>`:''}
+    <table>${mc.markets.map(m=>m.available?`<tr><td>${esc(m.name)}${m.feed&&m.feed.synthetic?' <span class="muted" title="Built from the six CME currency futures (ICE weights). Level sits a little off spot DXY because futures include carry; moves track it.">synthetic</span>':''}${m.feed&&m.feed.approx_legs&&m.feed.approx_legs.length?` <span class="muted">(${esc(m.feed.approx_legs.join(', '))} fixed)</span>`:''}<br><span class="muted">${esc(m.instrument)} ${fx(m.price)}</span></td><td class="r ${m.direction==='up'?'up':m.direction==='down'?'down':''}">${m.change_today?`${m.change_today.pct>=0?'+':''}${fmt(m.change_today.pct,2)}%`:'—'}<br><span class="muted">${m.direction||''}${m.key==='zn'&&m.direction&&m.direction!=='flat'?' (yields)':''}</span></td></tr>`:`<tr><td>${esc(m.name)}</td><td class="r muted">loading / no data</td></tr>`).join('')}</table>
+    <div class="lbl" style="margin-top:8px">Correlation of returns</div>
+    <table>${mc.corr.map(c=>`<tr><td>${esc(c.pair)} <span class="muted">${c.tf}</span></td><td class="r ${c.r==null?'muted':c.r<=-0.2?'up':c.r>=0.2?'down':''}">${c.r==null?'—':(c.r>0?'+':'')+fmt(c.r,2)}</td><td class="muted">${esc(c.note||'not enough data')}</td></tr>`).join('')}</table>
+    <div class="honest">Gold normally moves against the dollar and against yields (negative numbers). A positive number means gold is ignoring them. 10Y yields come from the CME T-Note future (ZN up = yields down). Context only: none of this has been backtested as an edge.</div>`:'<div class="empty">No data.</div>';
   // alerts
   const al=d.alerts,sc=al.score;
   $('alerts').innerHTML=`<div class="gr" style="grid-template-columns:repeat(4,auto);justify-content:start;gap:4px 18px">
@@ -392,6 +401,21 @@ async function load(){
     const d=await r.json();if(d.error){toast(d.error,true);return}render(d)}
   catch(e){toast('Desk not reachable: '+e,true)}finally{S.busy=false}
 }
+const hm=iso=>iso?new Date(iso).toLocaleString('en-US',{timeZone:NY,hour:'2-digit',minute:'2-digit',hour12:false}):'—';
+const cd=sec=>{const neg=sec<0;sec=Math.abs(Math.round(sec));const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60),s=sec%60;
+  return (neg?'−':'')+(d?`${d}d ${h}h`:h?`${h}h ${String(m).padStart(2,'0')}m`:`${m}:${String(s).padStart(2,'0')}`)};
+function newsTick(){ // live countdowns, every second, from the page clock (no server call)
+  const n=S.news;if(!n)return;const now=Date.now();
+  const ev=(n.upcoming||[]).find(e=>Date.parse(e.until)>=now);
+  const on=ev&&Date.parse(ev.no_entry_from)<=now;
+  if(!ev){$('tNews').textContent='none';$('tNews').style.color='';$('tNewsS').textContent='no red-folder event left this week';}
+  else{const t=(Date.parse(ev.time)-now)/1000;
+    $('tNews').textContent=on?(t>0?`BLACKOUT · ${cd(t)}`:`BLACKOUT · ends ${cd((Date.parse(ev.until)-now)/1000)}`):cd(t);
+    $('tNews').style.color=on?'var(--down)':t<3600*2?'var(--warn)':'';
+    $('tNewsS').textContent=on?`${ev.title} · ${nyT(ev.time)} · bot entries back ${hm(ev.until)}`:`${ev.title} · ${nyT(ev.time)} · no entries from ${hm(ev.no_entry_from)}`}
+  document.querySelectorAll('[data-cd]').forEach(el=>{const t=(Date.parse(el.dataset.cd)-now)/1000;el.textContent=t>0?cd(t):'out';el.className='r '+(t>0&&t<3600?'down':'')});
+}
+setInterval(newsTick,1000);
 setInterval(()=>{$('nyTime').textContent=new Date().toLocaleString('en-US',{timeZone:NY,weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' NY'},1000);
 function feedChip(d,s){const f=s.feed||{};
   if(f.feed!=='databento')return[d.demo?'demo':'ok','Prices',d.demo?d.source:`broker ${f.symbol||''} · every 20s`];

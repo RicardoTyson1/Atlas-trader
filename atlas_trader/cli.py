@@ -320,7 +320,9 @@ def cmd_desk(args, cfg: Config) -> None:
     if not args.demo and dbc.get("enabled") and os.environ.get("DATABENTO_API_KEY"):
         from .desk.databento_live import DatabentoLive
         live = DatabentoLive(os.environ["DATABENTO_API_KEY"], dbc.get("symbols") or {},
-                             max_history_usd=float(dbc.get("max_history_usd", 2.0))).start()
+                             max_history_usd=float(dbc.get("max_history_usd", 2.0)),
+                             dollar_index=dbc.get("dollar_index") or None,
+                             dollar_fallback=dbc.get("dollar_fallback") or None).start()
     elif dbc.get("enabled") and not args.demo:
         log.warning("desk: databento enabled but DATABENTO_API_KEY is not set; using broker prices")
     feed = DeskFeed(dcfg, src, bot_cfg=cfg, state_dir=state_dir, live=live)

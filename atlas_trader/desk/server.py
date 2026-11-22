@@ -55,6 +55,7 @@ class Desk:
                 "news": self.feed.news(self.feed.clock()),
                 "alerts": self.feed.alerts(),
                 "smt": self.cached("smt", 30 if self.feed.live else 120, self.feed.smt),
+                "macro": self.cached("macro", 30 if self.feed.live else 120, self.feed.macro),
                 "overview": self.cached("overview", 15 if self.feed.live else 120, self.feed.overview),
             }
 

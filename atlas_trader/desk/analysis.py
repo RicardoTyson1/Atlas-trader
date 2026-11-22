@@ -381,6 +381,29 @@ def smt(a: pd.DataFrame, b: pd.DataFrame, lookback: int = 48, inverse: bool = Fa
     return {"signal": "none", "detail": "both markets moving together"}
 
 
+# ----------------------------------------------------------------------------------- correlation
+def return_corr(a: pd.DataFrame, b: pd.DataFrame, bars: int = 96) -> dict | None:
+    """Correlation of bar-to-bar returns over the last `bars` bars both markets have."""
+    if a is None or b is None or a.empty or b.empty:
+        return None
+    df = pd.concat([a["close"].rename("a"), b["close"].rename("b")], axis=1, join="inner").astype(float)
+    ret = np.log(df).diff().dropna().tail(bars)
+    ret = ret[(ret["a"] != 0) | (ret["b"] != 0)]
+    if len(ret) < max(20, bars // 3) or ret["a"].std() == 0 or ret["b"].std() == 0:
+        return None
+    return {"r": float(ret["a"].corr(ret["b"])), "n": int(len(ret))}
+
+
+def corr_note(r: float) -> str:
+    if r <= -0.5:
+        return "strong inverse (normal)"
+    if r <= -0.2:
+        return "inverse (normal)"
+    if r < 0.2:
+        return "little link right now"
+    return "moving together (decoupled from the usual)"
+
+
 # ----------------------------------------------------------------------------------- checklist
 @dataclass
 class Check:

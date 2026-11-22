@@ -12,6 +12,11 @@ How it works (one background thread, small memory):
 The desk asks `bars(key, tf, count)`; 5m/15m come from the minutes, 1H/4H/1D from the hours plus the
 minutes since the history ended. 4H and daily candles start at 18:00 New York (the CME day).
 The API key is read from the environment and never logged.
+
+Dollar index: there is no DXY future on CME, so `dxy` is built from the six CME currency futures with
+the official ICE weights (euro 57.6%, yen 13.6%, pound 11.9%, CAD 9.1%, krona 4.2%, franc 3.6%).
+Futures prices include ~3 months of carry, so the level sits a little off the spot DXY; moves, swing
+highs/lows (SMT) and correlation follow it closely. A small step can show on CME roll days.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import threading
 import time as _time
 from datetime import timedelta
 
+import numpy as np
 import pandas as pd
 
 log = logging.getLogger("atlas.desk.databento")
@@ -29,6 +35,67 @@ DATASET = "GLBX.MDP3"
 AGG = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
 COLS = ["open", "high", "low", "close", "volume"]
 NY = "America/New_York"
+
+
+# ICE US Dollar Index: 50.14348112 x EURUSD^-0.576 x USDJPY^0.136 x GBPUSD^-0.119 x USDCAD^0.091
+# x USDSEK^0.042 x USDCHF^0.036. CME quotes every one of these futures as US dollars per unit of the
+# foreign currency (6J = USD per yen = 1/USDJPY), so each leg enters with a NEGATIVE exponent.
+DXY_CONST = 50.14348112
+DXY_WEIGHTS = {"eur": 0.576, "jpy": 0.136, "gbp": 0.119, "cad": 0.091, "sek": 0.042, "chf": 0.036}
+# Plausible USD-per-unit ranges, to undo any exchange display factor (e.g. yen quoted as 64.5 not 0.00645)
+DXY_RANGE = {"eur": (0.5, 2.5), "jpy": (0.002, 0.03), "gbp": (0.7, 3.0), "cad": (0.4, 1.5),
+             "sek": (0.04, 0.3), "chf": (0.5, 2.5)}
+
+
+def _rescale(v: float, lo: float, hi: float) -> float:
+    """Power-of-ten factor that brings v into [lo, hi] (1.0 if it already is or cannot be)."""
+    if not v or v != v or v <= 0:
+        return 1.0
+    f = 1.0
+    for _ in range(12):
+        if v * f > hi:
+            f /= 10
+        elif v * f < lo:
+            f *= 10
+        else:
+            return f
+    return 1.0
+
+
+def dollar_index(legs: dict[str, pd.DataFrame], fallback: dict[str, float] | None = None) -> pd.DataFrame:
+    """Dollar index bars from currency-future bars on the same grid (1m or 1h). A leg with no bar in a
+    minute keeps its last close. A leg with no data at all uses `fallback` (USD per unit) if given,
+    else no bars come out. high comes from the legs' lows and low from their highs (the index moves
+    against them); on 1-minute bars that overstates the range by almost nothing."""
+    fallback = fallback or {}
+    have = {k: df for k, df in legs.items() if df is not None and not df.empty}
+    missing = [k for k in DXY_WEIGHTS if k not in have]
+    if not have or any(k not in fallback for k in missing):
+        return _empty()
+    idx = have[next(iter(have))].index
+    for df in have.values():
+        idx = idx.union(df.index)
+    log_dxy = {c: pd.Series(np.log(DXY_CONST), index=idx) for c in ("open", "high", "low", "close")}
+    for k, w in DXY_WEIGHTS.items():
+        if k in have:
+            df = have[k].reindex(idx)
+            c = df["close"].ffill()
+            f = _rescale(float(c.dropna().iloc[-1]), *DXY_RANGE[k]) if c.notna().any() else 1.0
+            px = {"close": c, "open": df["open"].fillna(c), "high": df["high"].fillna(c), "low": df["low"].fillna(c)}
+            px = {n: v * f for n, v in px.items()}
+        else:
+            const = pd.Series(float(fallback[k]), index=idx)
+            px = {"open": const, "high": const, "low": const, "close": const}
+        log_dxy["open"] = log_dxy["open"] - w * np.log(px["open"])
+        log_dxy["close"] = log_dxy["close"] - w * np.log(px["close"])
+        log_dxy["high"] = log_dxy["high"] - w * np.log(px["low"])
+        log_dxy["low"] = log_dxy["low"] - w * np.log(px["high"])
+    out = pd.DataFrame({c: np.exp(v) for c, v in log_dxy.items()})
+    out["volume"] = 0.0
+    out = out.dropna()
+    out["high"] = out[["open", "high", "close"]].max(axis=1)
+    out["low"] = out[["open", "low", "close"]].min(axis=1)
+    return out[COLS]
 
 
 def _empty() -> pd.DataFrame:
@@ -55,9 +122,17 @@ class DatabentoLive:
     demo = False
 
     def __init__(self, key: str, symbols: dict[str, str], minute_days: float = 4, hour_days: int = 240,
-                 max_history_usd: float = 2.0, client_factory=None, clock=None):
+                 max_history_usd: float = 2.0, client_factory=None, clock=None,
+                 dollar_index: dict[str, str] | None = None, dollar_fallback: dict[str, float] | None = None):
         self.key = key
         self.symbols = dict(symbols)                     # desk key -> Databento symbol, e.g. gold -> GC.v.0
+        # dollar index legs, subscribed under hidden keys (dx_eur, dx_jpy...); `dxy` is computed from them
+        self.dx_legs = {leg: f"dx_{leg}" for leg in (dollar_index or {}) if leg in DXY_WEIGHTS}
+        for leg, k in self.dx_legs.items():
+            self.symbols[k] = dollar_index[leg]
+        self.dx_fallback = {k: float(v) for k, v in (dollar_fallback or {}).items() if k in DXY_WEIGHTS}
+        self._dx_cache: dict[str, tuple[float, pd.DataFrame]] = {}
+        self._leg_keys = set(self.dx_legs.values())
         self.by_symbol = {v: k for k, v in self.symbols.items()}
         self.minute_days = minute_days
         self.hour_days = hour_days
@@ -94,24 +169,57 @@ class DatabentoLive:
             except Exception:  # noqa: BLE001
                 pass
 
+    def covers(self, key: str) -> bool:
+        """Configured for this market (it may still be loading)."""
+        return key in self.symbols or (key == "dxy" and bool(self.dx_legs))
+
+    def _dx_missing(self) -> list[str]:
+        return [leg for leg in DXY_WEIGHTS if self.dx_legs.get(leg) not in self.loaded]
+
     def has(self, key: str) -> bool:
+        if key == "dxy" and self.dx_legs:
+            miss = self._dx_missing()
+            return len(miss) < len(DXY_WEIGHTS) and all(m in self.dx_fallback for m in miss)
         return key in self.loaded
 
     def age_seconds(self, key: str) -> float | None:
+        if key == "dxy" and self.dx_legs:      # the index is as fresh as its euro leg (57.6% of it)
+            key = self.dx_legs.get("eur", key)
         t = self._last_update.get(key)
         return None if t is None else _time.monotonic() - t
 
     def last_time(self, key: str) -> pd.Timestamp | None:
+        if key == "dxy" and self.dx_legs:
+            key = self.dx_legs.get("eur", key)
         return self._last_ts.get(key)
 
     def info(self, key: str) -> dict:
         age = self.age_seconds(key)
-        return {"feed": "databento", "symbol": self.symbols.get(key), "status": self.status,
-                "live": age is not None and age < 120,
-                "age_s": None if age is None else round(age, 1),
-                "last_time": None if key not in self._last_ts else self._last_ts[key].isoformat()}
+        last = self.last_time(key)
+        out = {"feed": "databento", "symbol": self.symbols.get(key), "status": self.status,
+               "live": age is not None and age < 120,
+               "age_s": None if age is None else round(age, 1),
+               "last_time": None if last is None else last.isoformat()}
+        if key == "dxy" and self.dx_legs:
+            miss = self._dx_missing()
+            out["symbol"] = "synthetic DXY (6E 6J 6B 6C SEK 6S)"
+            out["synthetic"] = True
+            out["approx_legs"] = miss          # legs on a fixed fallback rate instead of live prices
+        return out
+
+    def _dx_cached(self, kind: str, fn) -> pd.DataFrame:
+        """The index is rebuilt at most every 2 s (one desk refresh asks for it six times)."""
+        hit = self._dx_cache.get(kind)
+        if hit and _time.monotonic() - hit[0] < 2.0:
+            return hit[1]
+        df = fn()
+        self._dx_cache[kind] = (_time.monotonic(), df)
+        return df
 
     def minutes(self, key: str) -> pd.DataFrame:
+        if key == "dxy" and self.dx_legs:
+            return self._dx_cached("m", lambda: dollar_index(
+                {leg: self.minutes(k) for leg, k in self.dx_legs.items()}, self.dx_fallback))
         with self._lock:
             rows = sorted(self._mins.get(key, {}).items())
         if not rows:
@@ -126,14 +234,20 @@ class DatabentoLive:
             return m.tail(count)
         if tf in ("5m", "15m"):
             return resample(m, tf).tail(count)
-        with self._lock:
-            h = self._hours.get(key, _empty())
+        h = self.hours(key)
         if not m.empty:
             cut = m.index[0].floor("1h")
             h = pd.concat([h[h.index < cut], resample(m[m.index >= cut], "1H")])
         if tf == "1H":
             return h.tail(count)
         return resample(h, tf).tail(count)
+
+    def hours(self, key: str) -> pd.DataFrame:
+        if key == "dxy" and self.dx_legs:
+            return self._dx_cached("h", lambda: dollar_index(
+                {leg: self.hours(k) for leg, k in self.dx_legs.items()}, self.dx_fallback))
+        with self._lock:
+            return self._hours.get(key, _empty())
 
     # ------------------------------------------------------------------ incoming data
     def on_second(self, key: str, ts: pd.Timestamp, o: float, hi: float, lo: float, c: float, v: float) -> None:
@@ -151,6 +265,8 @@ class DatabentoLive:
                 bar[4] += v
             self._last_update[key] = _time.monotonic()
             self._last_ts[key] = ts
+            if key not in self.loaded and key in self._leg_keys:
+                self.loaded.add(key)        # a leg whose history was skipped still counts once it streams
 
     def _trim(self) -> None:
         keep = int((self.clock() - pd.Timedelta(days=self.minute_days)).timestamp())
@@ -228,9 +344,23 @@ class DatabentoLive:
         start_h = end_h - timedelta(days=self.hour_days)
         self._hist_end = end_m
         syms = list(self.symbols.values())
+
+        def price(symbols):
+            kw = dict(dataset=DATASET, symbols=symbols, stype_in="continuous")
+            return float(h.metadata.get_cost(schema="ohlcv-1m", start=start_m, end=end_m, **kw)
+                         + h.metadata.get_cost(schema="ohlcv-1h", start=start_h, end=end_h, **kw))
+
+        cost = price(syms)
+        if cost > self.max_usd and self.dx_legs:
+            # never lose the main markets' history over the dollar-index legs: drop those first
+            legs = {self.symbols[k] for k in self.dx_legs.values()}
+            core = [s for s in syms if s not in legs]
+            core_cost = price(core)
+            if core_cost <= self.max_usd:
+                log.warning("databento history: $%.2f with the dollar-index legs is over the cap; "
+                            "loading the other markets only ($%.2f)", cost, core_cost)
+                syms, cost = core, core_cost
         kw = dict(dataset=DATASET, symbols=syms, stype_in="continuous")
-        cost = (h.metadata.get_cost(schema="ohlcv-1m", start=start_m, end=end_m, **kw)
-                + h.metadata.get_cost(schema="ohlcv-1h", start=start_h, end=end_h, **kw))
         self.history_cost = round(float(cost), 4)
         log.info("databento history cost $%.4f (cap $%.2f)", cost, self.max_usd)
         if cost > self.max_usd:
