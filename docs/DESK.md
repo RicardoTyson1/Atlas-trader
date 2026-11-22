@@ -51,3 +51,13 @@ YM, NQ) on Rick's live Databento subscription:
   next to the futures price, and moves the bot's trade-entry lines by the basis so they sit where the
   trade really is. The bot itself still trades and reads broker prices only; nothing here changes it.
 * The dollar index is not on CME, so it stays on broker prices.
+
+### Background desk reads and broker load (2026-11-22)
+
+* Every 60 s the desk checks all markets on the live feed for a desk read and scores open ones, even
+  with the page closed (`desk.background_reads_s`). These checks make no broker calls.
+* Broker calls from the desk: account and positions at most every 30 s, the broker price (for the
+  basis) at most once a minute per market on screen, and a failed call waits a full cache period
+  before it is tried again. The bot's TradeLocker rate limit comes first.
+* On weekends Databento only replays the last ~20 h; when it rejects the replay start, the desk
+  restarts from the earliest time it allows.

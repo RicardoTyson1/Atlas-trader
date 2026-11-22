@@ -324,6 +324,7 @@ def cmd_desk(args, cfg: Config) -> None:
     elif dbc.get("enabled") and not args.demo:
         log.warning("desk: databento enabled but DATABENTO_API_KEY is not set; using broker prices")
     feed = DeskFeed(dcfg, src, bot_cfg=cfg, state_dir=state_dir, live=live)
+    feed.start_background(float(dcfg.get("background_reads_s", 60)))
     desk = Desk(feed, password, title=dcfg.get("title", "Atlas Desk"))
     serve(desk, args.host or dcfg.get("host", "127.0.0.1"), int(args.port or dcfg.get("port", 8787)))
 
